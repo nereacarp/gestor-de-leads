@@ -6,7 +6,8 @@
     "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc",
     "start": "node --env-file=.env dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:setup": "tsx --env-file=.env src/db/setup.ts"
   },
   "dependencies": {
     "fastify": "^5.12.8",
