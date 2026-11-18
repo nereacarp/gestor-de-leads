@@ -1,0 +1,13 @@
+# dependencias y compilado
+node_modules/
+dist/
+
+# variables de entorno
+.env
+
+# otros
+coverage/
+*.log
+
+# notas del proyecto
+notas.md

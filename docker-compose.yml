@@ -1,0 +1,18 @@
+# base de datos PostgreSQL para desarrollo local con Docker
+name: gestor-de-leads
+services:
+  db:
+    image: postgres:17
+    container_name: gestor-leads-db
+    # credenciales de ejemplo para desarrollo local con datos de prueba
+    environment:
+      POSTGRES_USER: leads
+      POSTGRES_PASSWORD: leads
+      POSTGRES_DB: leads
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
