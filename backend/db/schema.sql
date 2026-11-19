@@ -1,10 +1,5 @@
--- reinicia las tablas para desarrollo local
-drop table if exists leads;
-drop table if exists agentes;
-drop table if exists pesos;
-
 -- guarda los agentes
-create table agentes (
+create table if not exists agentes (
   id integer generated always as identity primary key,
   nombre text not null,
   rol text not null check (rol in ('agente', 'admin')),
@@ -12,7 +7,7 @@ create table agentes (
 );
 
 -- guarda los leads y los datos para calcular su puntuación
-create table leads (
+create table if not exists leads (
   id integer generated always as identity primary key,
   nombre text not null,
   telefono text not null,
@@ -24,15 +19,16 @@ create table leads (
   origen text
     check (origen in ('recomendacion', 'web', 'anuncio', 'llamada')),
   version integer not null default 1,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 -- crea índices para optimizar las consultas
-create index leads_estado_idx on leads (estado);
-create index leads_agente_id_idx on leads (agente_id);
+create index if not exists leads_estado_idx on leads (estado);
+create index if not exists leads_agente_id_idx on leads (agente_id);
 
 -- guarda los pesos para calcular la puntuación de los leads
-create table pesos (
+create table if not exists pesos (
   id integer primary key default 1 check (id = 1),
   peso_cliente_nuevo integer not null check (peso_cliente_nuevo >= 0),
   peso_interes integer not null check (peso_interes >= 0),
@@ -43,4 +39,5 @@ create table pesos (
 
 -- crea los pesos iniciales
 insert into pesos (peso_cliente_nuevo, peso_interes, peso_origen, peso_antiguedad)
-values (40, 30, 20, 10);
+values (40, 30, 20, 10)
+on conflict (id) do nothing;
