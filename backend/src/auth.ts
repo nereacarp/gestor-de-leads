@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { sql } from "./db/sql";
 
 // define cómo es un agente
 export type Agente = { id: number; nombre: string; rol: "agente" | "admin" };
@@ -18,7 +19,6 @@ const RUTAS_PUBLICAS = ["/health"];
 
 // busca en la base de datos el agente que tiene el token recibido
 export const buscarAgentePorToken: BuscarAgente = async (token) => {
-  const { sql } = await import("./db/sql.js"); 
   const filas = await sql<Agente[]>`
     select id, nombre, rol from agentes where token = ${token}
   `;
