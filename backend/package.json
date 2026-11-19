@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/index.js",
     "test": "vitest run",
-    "db:setup": "tsx --env-file=.env src/db/setup.ts"
+    "db:setup": "tsx --env-file=.env src/db/setup.ts",
+    "db:seed": "tsx --env-file=.env src/db/seed.ts",
+    "db:reset": "tsx --env-file=.env src/db/reset.ts && npm run db:setup && npm run db:seed"
   },
   "dependencies": {
     "fastify": "^5.12.8",
