@@ -23,6 +23,7 @@ function aLead(fila: FilaLead) {
     estado: fila.estado,
     agente: fila.agente_id ? { id: fila.agente_id, nombre: fila.agente_nombre } : null,
     version: fila.version,
+    creado: fila.created_at,
     actualizado: fila.updated_at,
     puntuacion: redondear(fila.puntuacion),
     prioridad: fila.prioridad,

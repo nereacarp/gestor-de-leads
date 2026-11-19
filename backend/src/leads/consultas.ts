@@ -8,6 +8,7 @@ export type FilaLead = {
   telefono: string;
   estado: string;
   version: number;
+  created_at: Date;
   updated_at: Date;
   agente_id: number | null;
   agente_nombre: string | null;
@@ -54,7 +55,7 @@ export async function listarLeads(filtros: Filtros) {
 
   return sql<FilaLead[]>`
     select
-      lp.id, lp.nombre, lp.telefono, lp.estado, lp.version, lp.updated_at,
+      lp.id, lp.nombre, lp.telefono, lp.estado, lp.version, lp.created_at, lp.updated_at,
       lp.agente_id, a.nombre as agente_nombre,
       lp.puntuacion, lp.prioridad,
       lp.val_cliente_nuevo, lp.val_interes, lp.val_origen, lp.val_antiguedad,
