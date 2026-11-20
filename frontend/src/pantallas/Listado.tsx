@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useApi } from "../api/hookApi";
+import { Dialogo } from "../componentes/Dialogo";
+import { FormularioLead } from "../componentes/FormularioLead";
 
 // describe el agente tal como lo devuelve la api
 type Agente = { id: number; nombre: string };
@@ -48,6 +50,9 @@ export function Listado() {
   // texto del buscador mientras se escribe, antes de pasarlo a la dirección
   const [texto, setTexto] = useState(q);
 
+  // indica si está abierta la ventana para crear un lead
+  const [creando, setCreando] = useState(false);
+
   // pasa el texto a la dirección cuando el usuario deja de escribir
   useEffect(() => {
     if (texto === q) return;
@@ -74,7 +79,7 @@ export function Listado() {
   if (estado) consulta.set("estado", estado);
   if (agente) consulta.set("agente", agente);
 
-  const { datos: respuesta, cargando, error } = useApi<RespuestaLeads>(`/leads?${consulta}`);
+  const { datos: respuesta, cargando, error, recargar } = useApi<RespuestaLeads>(`/leads?${consulta}`);
   const { datos: agentes } = useApi<{ datos: Agente[] }>("/agentes?rol=agente");
 
   const total = respuesta?.total ?? 0;
@@ -110,8 +115,22 @@ export function Listado() {
               {a.nombre}
             </option>
           ))}
-        </select>
+        </select>{" "}
+        <button onClick={() => setCreando(true)}>+ Nuevo</button>
       </div>
+
+      {/* ventana para crear un lead: al guardar se cierra y se recarga la lista */}
+      {creando && (
+        <Dialogo titulo="Nuevo lead" onCerrar={() => setCreando(false)}>
+          <FormularioLead
+            onGuardado={() => {
+              setCreando(false);
+              recargar();
+            }}
+            onCancelar={() => setCreando(false)}
+          />
+        </Dialogo>
+      )}
 
       {error && <p>error: {error.message}</p>}
       {cargando && <p>cargando...</p>}

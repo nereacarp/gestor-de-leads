@@ -8,8 +8,9 @@ export function useApi<T>(ruta: string) {
   const [datos, setDatos] = useState<T | null>(null);
   const [error, setError] = useState<ErrorApi | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [version, setVersion] = useState(0); // sube cada vez que se pide recargar, para volver a pedir los datos
 
-  // pide los datos cada vez que cambia el token o la ruta
+  // pide los datos cada vez que cambia el token, la ruta o la versión
   useEffect(() => {
     // evita guardar una respuesta antigua si mientras tanto ha cambiado la ruta o el token
     let cancelado = false;
@@ -30,7 +31,12 @@ export function useApi<T>(ruta: string) {
     return () => {
       cancelado = true;
     };
-  }, [token, ruta]);
+  }, [token, ruta, version]);
 
-  return { datos, cargando, error };
+  // vuelve a pedir los datos de la misma ruta
+  function recargar() {
+    setVersion((v) => v + 1);
+  }
+
+  return { datos, cargando, error, recargar };
 }
