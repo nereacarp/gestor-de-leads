@@ -31,6 +31,31 @@ type Campos = {
 // valores con los que empieza el formulario (prefijo de España)
 const INICIAL: Campos = { nombre: "", prefijo: "34", numero: "", clienteNuevo: false, interes: "", origen: "", agenteId: "" };
 
+// describe el lead que se edita tal como lo devuelve la api
+export type LeadEditable = {
+  id: number;
+  nombre: string;
+  prefijo: string;
+  telefono: string;
+  clienteNuevo: boolean;
+  interes: number | null;
+  origen: string | null;
+  version: number;
+};
+
+// convierte un lead en los valores del formulario
+function camposDe(lead: LeadEditable): Campos {
+  return {
+    nombre: lead.nombre,
+    prefijo: lead.prefijo,
+    numero: lead.telefono,
+    clienteNuevo: lead.clienteNuevo,
+    interes: lead.interes === null ? "" : String(lead.interes),
+    origen: lead.origen ?? "",
+    agenteId: "",
+  };
+}
+
 // devuelve el mensaje de error de cada campo obligatorio que no es válido
 function validar(campos: Campos) {
   const errores: { nombre?: string; prefijo?: string; numero?: string } = {};
@@ -43,13 +68,24 @@ function validar(campos: Campos) {
   return errores;
 }
 
-// formulario para crear un lead; si se elige agente, pide confirmación antes de guardar
-export function FormularioLead({ onGuardado, onCancelar }: { onGuardado: () => void; onCancelar: () => void }) {
+// formulario para crear un lead (si se elige agente, pide confirmación) o, si recibe un lead, para editar sus datos
+export function FormularioLead({
+  lead,
+  onGuardado,
+  onCancelar,
+  onConflicto,
+}: {
+  lead?: LeadEditable;
+  onGuardado: () => void;
+  onCancelar: () => void;
+  onConflicto?: () => void;
+}) {
+  const editando = lead !== undefined;
   const { token } = useSesion();
   const { datos: yo } = useApi<Usuario>("/me");
   const { datos: agentes } = useApi<{ datos: Agente[] }>("/agentes?rol=agente");
 
-  const [campos, setCampos] = useState(INICIAL);
+  const [campos, setCampos] = useState(lead ? camposDe(lead) : INICIAL);
   const [tocados, setTocados] = useState<Record<string, boolean>>({}); // campos que el usuario ya ha dejado
   const [confirmando, setConfirmando] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -82,7 +118,7 @@ export function FormularioLead({ onGuardado, onCancelar }: { onGuardado: () => v
     return tocados[campo] && errores[campo] ? <span> {errores[campo]}</span> : null;
   }
 
-  // envía el lead a la api; si va bien, avisa a la pantalla para que cierre y recargue
+  // envía el lead a la api (crea o edita según el caso); si va bien, avisa a la pantalla para que cierre y recargue
   async function guardar() {
     setGuardando(true);
     setError(null);
@@ -90,13 +126,15 @@ export function FormularioLead({ onGuardado, onCancelar }: { onGuardado: () => v
     try {
       const cuerpo = {
         nombre: campos.nombre.trim(),
-        telefono: `+${campos.prefijo}${campos.numero}`,
+        prefijo: campos.prefijo,
+        telefono: campos.numero,
         clienteNuevo: campos.clienteNuevo,
         ...(campos.interes ? { interes: Number(campos.interes) } : {}),
         ...(campos.origen ? { origen: campos.origen } : {}),
         ...(campos.agenteId ? { agenteId: Number(campos.agenteId) } : {}),
       };
-      await pedirApi(token, "/leads", { metodo: "POST", cuerpo });
+      if (lead) await pedirApi(token, `/leads/${lead.id}`, { metodo: "PUT", cuerpo: { ...cuerpo, version: lead.version } });
+      else await pedirApi(token, "/leads", { metodo: "POST", cuerpo });
       onGuardado();
     } catch (e) {
       setError(e as ErrorApi);
@@ -116,6 +154,8 @@ export function FormularioLead({ onGuardado, onCancelar }: { onGuardado: () => v
   const errorApi = error && (
     <div>
       <p>error: {error.message}</p>
+      {/* si otra persona modificó el lead, se ofrece cerrar y ver los datos actuales */}
+      {error.estado === 409 && onConflicto && <button onClick={onConflicto}>Ver los datos actuales</button>}
       <ul>
         {error.detalles.map((detalle, i) => (
           <li key={i}>
@@ -223,21 +263,24 @@ export function FormularioLead({ onGuardado, onCancelar }: { onGuardado: () => v
         </select>
       </div>
 
-      <div>
-        <label htmlFor="agente">Asignar a</label>{" "}
-        <select id="agente" value={campos.agenteId} onChange={(e) => cambiar("agenteId", e.target.value)}>
-          <option value="">Sin asignar</option>
-          {asignables.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.nombre}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* al editar no se elige agente: se asigna y se libera desde el bloque de gestión */}
+      {!editando && (
+        <div>
+          <label htmlFor="agente">Asignar a</label>{" "}
+          <select id="agente" value={campos.agenteId} onChange={(e) => cambiar("agenteId", e.target.value)}>
+            <option value="">Sin asignar</option>
+            {asignables.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <p>
         <button type="submit" disabled={hayErrores || guardando}>
-          {guardando ? "guardando..." : "Guardar"}
+          {guardando ? "guardando..." : editando ? "Guardar cambios" : "Guardar"}
         </button>{" "}
         <button type="button" onClick={onCancelar}>
           Cancelar
