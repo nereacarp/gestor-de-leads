@@ -222,8 +222,9 @@ describe("puntuación y orden", () => {
 // tests de los filtros y la búsqueda de GET /leads
 describe("filtros y búsqueda", () => {
   it("filtra por estado", async () => {
+    const ana = await crearAgente("Ana");
     await crearLead({ nombre: "A", estado: "nuevo" });
-    await crearLead({ nombre: "B", estado: "contactado" });
+    await crearLead({ nombre: "B", estado: "contactado", agenteId: ana });
     await crearLead({ nombre: "C", estado: "cerrado" });
 
     const { cuerpo } = await pedir("?estado=contactado");
@@ -368,5 +369,29 @@ describe("errores", () => {
     await sinPermiso.close();
 
     expect(res.statusCode).toBe(401);
+  });
+});
+
+// tests de la regla de la base de datos: solo los leads nuevos y cerrados pueden no tener agente
+describe("coherencia entre estado y agente", () => {
+  it.each<[string, string, boolean]>([
+    ["un lead nuevo sin agente", "nuevo", false],
+    ["un lead cerrado sin agente", "cerrado", false],
+    ["un lead cerrado con agente", "cerrado", true],
+    ["un lead en gestión con agente", "en_gestion", true],
+    ["un lead contactado con agente", "contactado", true],
+  ])("acepta %s", async (_descripcion, estado, conAgente) => {
+    const agenteId = conAgente ? await crearAgente("Ana") : null;
+
+    await expect(crearLead({ nombre: "Lead", estado, agenteId })).resolves.toBeUndefined();
+  });
+
+  it.each<[string, string, boolean]>([
+    ["un lead en gestión sin agente", "en_gestion", false],
+    ["un lead contactado sin agente", "contactado", false],
+  ])("rechaza %s", async (_descripcion, estado, conAgente) => {
+    const agenteId = conAgente ? await crearAgente("Ana") : null;
+
+    await expect(crearLead({ nombre: "Lead", estado, agenteId })).rejects.toThrow(/leads_estado_agente_check/);
   });
 });

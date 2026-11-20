@@ -27,6 +27,11 @@ create table if not exists leads (
 create index if not exists leads_estado_idx on leads (estado);
 create index if not exists leads_agente_id_idx on leads (agente_id);
 
+-- exige agente en los leads en gestión o contactados (solo los nuevos y los cerrados pueden no tenerlo)
+alter table leads drop constraint if exists leads_estado_agente_check;
+alter table leads add constraint leads_estado_agente_check
+  check (estado in ('nuevo', 'cerrado') or agente_id is not null);
+
 -- guarda los pesos para calcular la puntuación de los leads
 create table if not exists pesos (
   id integer primary key default 1 check (id = 1),
