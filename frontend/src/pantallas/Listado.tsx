@@ -88,26 +88,39 @@ export function Listado() {
   const hasta = Math.min(pagina * LIMITE, total);
 
   return (
-    <main>
-      <h1>Leads</h1>
+    <main className="pagina">
+      {/* título y botón para crear un lead */}
+      <div className="encabezado">
+        <div>
+          <p className="sobretitulo">Gestión comercial</p>
+          <h1>Leads</h1>
+        </div>
+        <button className="boton principal" onClick={() => setCreando(true)}>
+          + Nuevo lead
+        </button>
+      </div>
 
       {/* buscador y filtros */}
-      <div>
-        <input
-          type="search"
-          placeholder="Buscar nombre o teléfono"
-          value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-        />{" "}
-        <select value={estado} onChange={(e) => cambiarParams({ estado: e.target.value })}>
+      <div className="filtros">
+        <label className="buscador">
+          <span className="icono-lupa" aria-hidden="true"></span>
+          <input
+            type="search"
+            placeholder="Buscar por nombre o teléfono"
+            aria-label="Buscar por nombre o teléfono"
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+          />
+        </label>
+        <select aria-label="Filtrar por estado" value={estado} onChange={(e) => cambiarParams({ estado: e.target.value })}>
           <option value="">Todos los estados</option>
           {Object.entries(ESTADOS).map(([valor, nombre]) => (
             <option key={valor} value={valor}>
               {nombre}
             </option>
           ))}
-        </select>{" "}
-        <select value={agente} onChange={(e) => cambiarParams({ agente: e.target.value })}>
+        </select>
+        <select aria-label="Filtrar por agente" value={agente} onChange={(e) => cambiarParams({ agente: e.target.value })}>
           <option value="">Todos los agentes</option>
           <option value="sin">Sin agente</option>
           {agentes?.datos.map((a) => (
@@ -115,8 +128,7 @@ export function Listado() {
               {a.nombre}
             </option>
           ))}
-        </select>{" "}
-        <button onClick={() => setCreando(true)}>+ Nuevo</button>
+        </select>
       </div>
 
       {/* ventana para crear un lead: al guardar se cierra y se recarga la lista */}
@@ -133,53 +145,76 @@ export function Listado() {
       )}
 
       {error && (
-        <p>
-          error: {error.message} <button onClick={recargar}>Reintentar</button>
+        <p className="error">
+          error: {error.message}{" "}
+          <button className="boton secundario" onClick={recargar}>
+            Reintentar
+          </button>
         </p>
       )}
-      {cargando && <p>cargando...</p>}
+      {cargando && <p className="cargando">cargando...</p>}
 
       {/* no se muestra la tabla si hay error para no enseñar datos antiguos */}
       {!error && respuesta && (
         <>
           {respuesta.datos.length === 0 ? (
-            <p>No hay leads con estos filtros</p>
+            <p className="vacio">No hay leads con estos filtros</p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Estado</th>
-                  <th>Agente</th>
-                  <th>Score / prioridad</th>
-                  <th>Acción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {respuesta.datos.map((lead) => (
-                  <tr key={lead.id}>
-                    <td>{lead.nombre}</td>
-                    <td>{ESTADOS[lead.estado] ?? lead.estado}</td>
-                    <td>{lead.agente?.nombre ?? "—"}</td>
-                    <td>
-                      {lead.puntuacion} / {PRIORIDADES[lead.prioridad] ?? lead.prioridad}
-                    </td>
-                    <td>
-                      <Link to={`/leads/${lead.id}`}>Ver</Link>
-                    </td>
+            // la tabla se ve como tarjetas en móvil (ver tabla-leads en estilos.css)
+            <div className="tabla-caja">
+              <table className="tabla-leads">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Estado</th>
+                    <th>Agente asignado</th>
+                    <th>Score / prioridad</th>
+                    <th className="columna-accion">Acción</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {respuesta.datos.map((lead) => (
+                    <tr key={lead.id}>
+                      <td>
+                        <Link className="nombre-lead" to={`/leads/${lead.id}`}>
+                          {lead.nombre}
+                        </Link>
+                        <small>{lead.telefono}</small>
+                      </td>
+                      <td>
+                        <span className={`pastilla ${lead.estado}`}>{ESTADOS[lead.estado] ?? lead.estado}</span>
+                      </td>
+                      <td>{lead.agente?.nombre ?? <span className="suave">Sin asignar</span>}</td>
+                      <td>
+                        <span className="puntuacion">{lead.puntuacion}</span>
+                        <span className={`pastilla ${lead.prioridad}`}>{PRIORIDADES[lead.prioridad] ?? lead.prioridad}</span>
+                      </td>
+                      <td className="columna-accion">
+                        <Link className="enlace" to={`/leads/${lead.id}`}>
+                          Ver
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {/* paginación */}
-          <p>
-            <button disabled={pagina <= 1} onClick={() => cambiarParams({ pagina: String(pagina - 1) })}>
-              Anterior
-            </button>{" "}
-            {desde}–{hasta} de {total}{" "}
+          <p className="paginacion">
             <button
+              className="boton secundario"
+              disabled={pagina <= 1}
+              onClick={() => cambiarParams({ pagina: String(pagina - 1) })}
+            >
+              Anterior
+            </button>
+            <span>
+              {desde} a {hasta} de {total}
+            </span>
+            <button
+              className="boton secundario"
               disabled={pagina >= totalPaginas}
               onClick={() => cambiarParams({ pagina: String(pagina + 1) })}
             >

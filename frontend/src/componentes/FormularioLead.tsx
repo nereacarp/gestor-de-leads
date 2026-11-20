@@ -115,7 +115,7 @@ export function FormularioLead({
 
   // muestra el error de un campo solo si el usuario ya ha salido de él
   function mensaje(campo: "nombre" | "prefijo" | "numero") {
-    return tocados[campo] && errores[campo] ? <span> {errores[campo]}</span> : null;
+    return tocados[campo] && errores[campo] ? <small className="campo-error">{errores[campo]}</small> : null;
   }
 
   // envía el lead a la api (crea o edita según el caso); si va bien, avisa a la pantalla para que cierre y recargue
@@ -152,10 +152,14 @@ export function FormularioLead({
 
   // muestra el mensaje de error de la api y sus detalles
   const errorApi = error && (
-    <div>
+    <div className="error">
       <p>error: {error.message}</p>
       {/* si otra persona modificó el lead, se ofrece cerrar y ver los datos actuales */}
-      {error.estado === 409 && onConflicto && <button onClick={onConflicto}>Ver los datos actuales</button>}
+      {error.estado === 409 && onConflicto && (
+        <button type="button" className="boton secundario" onClick={onConflicto}>
+          Ver los datos actuales
+        </button>
+      )}
       <ul>
         {error.detalles.map((detalle, i) => (
           <li key={i}>
@@ -171,123 +175,139 @@ export function FormularioLead({
   if (confirmando) {
     return (
       <div>
-        <p>
-          El lead «{campos.nombre.trim()}» se creará asignado a {agenteElegido?.nombre} y en estado "En gestión". ¿Confirmas?
-        </p>
-        <button onClick={guardar} disabled={guardando}>
-          {guardando ? "guardando..." : "Confirmar y crear"}
-        </button>{" "}
-        <button
-          disabled={guardando}
-          onClick={() => {
-            setConfirmando(false);
-            setError(null);
-          }}
-        >
-          Volver
-        </button>
-        {errorApi}
+        {/* mensaje de confirmación y posible error */}
+        <div className="formulario-cuerpo">
+          <p>
+            El lead «{campos.nombre.trim()}» se creará asignado a {agenteElegido?.nombre} y en estado "En gestión". ¿Confirmas?
+          </p>
+          {errorApi}
+        </div>
+        {/* botones de la confirmación */}
+        <div className="formulario-pie">
+          <button
+            className="boton secundario"
+            disabled={guardando}
+            onClick={() => {
+              setConfirmando(false);
+              setError(null);
+            }}
+          >
+            Volver
+          </button>
+          <button className="boton principal" onClick={guardar} disabled={guardando}>
+            {guardando ? "guardando..." : "Confirmar y crear"}
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <form onSubmit={enviar}>
-      <div>
-        <label htmlFor="nombre">Nombre *</label>{" "}
-        <input
-          id="nombre"
-          maxLength={100}
-          value={campos.nombre}
-          onChange={(e) => cambiar("nombre", e.target.value)}
-          onBlur={() => tocar("nombre")}
-        />
-        {mensaje("nombre")}
-      </div>
+      {/* campos del formulario */}
+      <div className="formulario-cuerpo">
+        <label className="campo">
+          <span>Nombre *</span>
+          <input
+            maxLength={100}
+            value={campos.nombre}
+            onChange={(e) => cambiar("nombre", e.target.value)}
+            onBlur={() => tocar("nombre")}
+            aria-invalid={!!(tocados.nombre && errores.nombre)}
+          />
+          {mensaje("nombre")}
+        </label>
 
-      <div>
-        <label htmlFor="numero">Teléfono *</label> +
-        <input
-          aria-label="Prefijo"
-          size={3}
-          maxLength={3}
-          inputMode="numeric"
-          value={campos.prefijo}
-          onChange={(e) => cambiarDigitos("prefijo", e.target.value)}
-          onBlur={() => tocar("prefijo")}
-        />{" "}
-        <input
-          id="numero"
-          maxLength={14}
-          inputMode="numeric"
-          value={campos.numero}
-          onChange={(e) => cambiarDigitos("numero", e.target.value)}
-          onBlur={() => tocar("numero")}
-        />
-        {mensaje("prefijo")}
-        {mensaje("numero")}
-      </div>
+        {/* prefijo y número del teléfono */}
+        <fieldset className="telefono">
+          <legend>Teléfono *</legend>
+          <div className="prefijo">
+            <span aria-hidden="true">+</span>
+            <input
+              aria-label="Prefijo"
+              maxLength={3}
+              inputMode="numeric"
+              value={campos.prefijo}
+              onChange={(e) => cambiarDigitos("prefijo", e.target.value)}
+              onBlur={() => tocar("prefijo")}
+            />
+          </div>
+          <input
+            aria-label="Número de teléfono"
+            maxLength={14}
+            inputMode="numeric"
+            value={campos.numero}
+            onChange={(e) => cambiarDigitos("numero", e.target.value)}
+            onBlur={() => tocar("numero")}
+          />
+          {mensaje("prefijo")}
+          {mensaje("numero")}
+        </fieldset>
 
-      <div>
-        <label>
+        {/* casilla de cliente nuevo */}
+        <label className="casilla">
           <input
             type="checkbox"
             checked={campos.clienteNuevo}
             onChange={(e) => cambiar("clienteNuevo", e.target.checked)}
-          />{" "}
-          Cliente nuevo
+          />
+          <span>Es cliente nuevo</span>
         </label>
-      </div>
 
-      <div>
-        <label htmlFor="interes">Interés</label>{" "}
-        <select id="interes" value={campos.interes} onChange={(e) => cambiar("interes", e.target.value)}>
-          <option value="">Sin indicar</option>
-          {[1, 2, 3, 4, 5].map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-      </div>
+        {/* interés y origen, uno al lado del otro */}
+        <div className="rejilla-2">
+          <label className="campo">
+            <span>Interés</span>
+            <select value={campos.interes} onChange={(e) => cambiar("interes", e.target.value)}>
+              <option value="">Sin indicar</option>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      <div>
-        <label htmlFor="origen">Origen</label>{" "}
-        <select id="origen" value={campos.origen} onChange={(e) => cambiar("origen", e.target.value)}>
-          <option value="">Sin indicar</option>
-          {Object.entries(ORIGENES).map(([valor, nombre]) => (
-            <option key={valor} value={valor}>
-              {nombre}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* al editar no se elige agente: se asigna y se libera desde el bloque de gestión */}
-      {!editando && (
-        <div>
-          <label htmlFor="agente">Asignar a</label>{" "}
-          <select id="agente" value={campos.agenteId} onChange={(e) => cambiar("agenteId", e.target.value)}>
-            <option value="">Sin asignar</option>
-            {asignables.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.nombre}
-              </option>
-            ))}
-          </select>
+          <label className="campo">
+            <span>Origen</span>
+            <select value={campos.origen} onChange={(e) => cambiar("origen", e.target.value)}>
+              <option value="">Sin indicar</option>
+              {Object.entries(ORIGENES).map(([valor, nombre]) => (
+                <option key={valor} value={valor}>
+                  {nombre}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-      )}
 
-      <p>
-        <button type="submit" disabled={hayErrores || guardando}>
-          {guardando ? "guardando..." : editando ? "Guardar cambios" : "Guardar"}
-        </button>{" "}
-        <button type="button" onClick={onCancelar}>
+        {/* al editar no se elige agente: se asigna y se libera desde el bloque de gestión */}
+        {!editando && (
+          <label className="campo">
+            <span>Asignar a</span>
+            <select value={campos.agenteId} onChange={(e) => cambiar("agenteId", e.target.value)}>
+              <option value="">Sin asignar</option>
+              {asignables.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {errorApi}
+      </div>
+
+      {/* botones del formulario */}
+      <div className="formulario-pie">
+        <button type="button" className="boton secundario" onClick={onCancelar}>
           Cancelar
         </button>
-      </p>
-
-      {errorApi}
+        <button className="boton principal" type="submit" disabled={hayErrores || guardando}>
+          {guardando ? "guardando..." : editando ? "Guardar cambios" : "Guardar"}
+        </button>
+      </div>
     </form>
   );
 }

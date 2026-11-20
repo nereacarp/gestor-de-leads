@@ -14,6 +14,14 @@ const NOMBRES: Record<string, string> = {
   antiguedad: "Antigüedad",
 };
 
+// texto que explica cómo se valora (de 0 a 100) cada criterio
+const VALORACIONES: Record<string, string> = {
+  cliente_nuevo: "Sí 100, no 0",
+  interes: "De 1 a 5 se convierte en 0 a 100",
+  origen: "Recomendación 100, web 70, anuncio 40, llamada 20",
+  antiguedad: "100 el día que se crea, baja hasta 0 a los 90 días",
+};
+
 // muestra los campos para editar los pesos y los guarda solo si suman 100
 function FormularioPesos({ inicial }: { inicial: Peso[] }) {
   const { token } = useSesion();
@@ -51,51 +59,21 @@ function FormularioPesos({ inicial }: { inicial: Peso[] }) {
 
   return (
     <form
+      className="pesos"
       onSubmit={(e) => {
         e.preventDefault();
         guardar();
       }}
     >
-      <table>
-        <thead>
-          <tr>
-            <th>Criterio</th>
-            <th>Peso (%)</th>
-            <th>Valoración</th>
-          </tr>
-        </thead>
-        <tbody>
-          {inicial.map((p, i) => (
-            <tr key={p.criterio}>
-              <td>
-                <label htmlFor={p.criterio}>{NOMBRES[p.criterio] ?? p.criterio}</label>
-              </td>
-              <td>
-                <input
-                  id={p.criterio}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={3}
-                  value={valores[i]}
-                  onChange={(e) => cambiar(i, e.target.value)}
-                />
-              </td>
-              <td>0–100</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <p>
-        Total: {total} %{total !== 100 && " (los pesos deben sumar 100)"}
-      </p>
-      <button type="submit" disabled={total !== 100 || guardando}>
-        {guardando ? "guardando..." : "Guardar pesos"}
-      </button>
-
-      {guardado && <p>Pesos guardados</p>}
+      {/* aviso de que los pesos se han guardado */}
+      {guardado && (
+        <p className="aviso" role="status">
+          Pesos guardados
+        </p>
+      )}
+      {/* error de la api con sus detalles */}
       {error && (
-        <div>
+        <div className="error" role="alert">
           <p>error: {error.message}</p>
           <ul>
             {error.detalles.map((detalle, i) => (
@@ -107,6 +85,53 @@ function FormularioPesos({ inicial }: { inicial: Peso[] }) {
           </ul>
         </div>
       )}
+
+      {/* un campo de peso por criterio y cómo se valora cada uno */}
+      <div className="tabla-caja compacta">
+        <table>
+          <thead>
+            <tr>
+              <th>Criterio</th>
+              <th>Peso (%)</th>
+              <th>Cómo se valora</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inicial.map((p, i) => (
+              <tr key={p.criterio}>
+                <td>
+                  <label htmlFor={p.criterio}>{NOMBRES[p.criterio] ?? p.criterio}</label>
+                </td>
+                <td>
+                  <div className="campo-numero">
+                    <input
+                      id={p.criterio}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={3}
+                      value={valores[i]}
+                      onChange={(e) => cambiar(i, e.target.value)}
+                    />
+                    <span>%</span>
+                  </div>
+                </td>
+                <td>{VALORACIONES[p.criterio] ?? "De 0 a 100"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* total de los pesos y botón de guardar */}
+      <div className="pesos-pie">
+        <div>
+          <span>Total de los pesos{total !== 100 && " (deben sumar 100)"}</span>
+          <strong className={total === 100 ? "" : "total-invalido"}>{total} %</strong>
+        </div>
+        <button className="boton principal" type="submit" disabled={total !== 100 || guardando}>
+          {guardando ? "guardando..." : "Guardar pesos"}
+        </button>
+      </div>
     </form>
   );
 }
@@ -116,12 +141,21 @@ export function Pesos() {
   const { datos: respuesta, cargando, error, recargar } = useApi<{ datos: Peso[] }>("/pesos");
 
   return (
-    <main>
-      <h1>Configuración de pesos / Administración</h1>
-      {cargando && <p>cargando...</p>}
+    <main className="pagina">
+      {/* título de la pantalla */}
+      <div className="encabezado">
+        <div>
+          <p className="sobretitulo">Administración</p>
+          <h1>Configuración de pesos</h1>
+        </div>
+      </div>
+      {cargando && <p className="cargando">cargando...</p>}
       {error && (
-        <p>
-          error: {error.message} <button onClick={recargar}>Reintentar</button>
+        <p className="error">
+          error: {error.message}{" "}
+          <button className="boton secundario" onClick={recargar}>
+            Reintentar
+          </button>
         </p>
       )}
       {/* se muestra solo con datos recién cargados, para no enseñar los de otro usuario */}

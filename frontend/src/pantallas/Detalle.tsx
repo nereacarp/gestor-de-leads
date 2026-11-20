@@ -126,55 +126,95 @@ export function Detalle() {
   }
 
   return (
-    <main>
-      <p>
-        <button onClick={volver}>← Volver</button>
-      </p>
+    <main className="pagina">
+      {/* botón blanco y redondo para volver al listado */}
+      <button className="volver" onClick={volver}>
+        <span className="volver-icono" aria-hidden="true"></span>
+        Volver
+      </button>
 
       {error && (
-        <p>
-          error: {error.message} <button onClick={recargar}>Reintentar</button>
+        <p className="error">
+          error: {error.message}{" "}
+          <button className="boton secundario" onClick={recargar}>
+            Reintentar
+          </button>
         </p>
       )}
-      {cargando && <p>cargando...</p>}
+      {cargando && <p className="cargando">cargando...</p>}
 
       {/* no se muestran datos si hay error para no enseñar datos antiguos */}
       {!error && lead && (
         <>
-          <h1>{lead.nombre}</h1>
+          {/* título del lead y botón de editar */}
+          <div className="encabezado ficha">
+            <div>
+              <p className="sobretitulo">Ficha del lead</p>
+              <h1>{lead.nombre}</h1>
+            </div>
+            {/* solo se puede editar si se puede gestionar el lead */}
+            {puedeGestionar && (
+              <button className="boton secundario" onClick={() => setEditando(true)}>
+                Editar datos
+              </button>
+            )}
+          </div>
 
           {/* aviso de conflicto: otra persona modificó el lead antes */}
           {conflicto && (
-            <p role="alert">
-              {conflicto}. <button onClick={actualizar}>Recargar</button>
+            <p className="aviso alerta" role="alert">
+              {conflicto}.
+              <button className="boton secundario" onClick={actualizar}>
+                Recargar
+              </button>
             </p>
           )}
 
           {/* datos del lead */}
-          <section>
-            <h2>Datos</h2>
-            <dl>
-              <dt>Teléfono</dt>
-              <dd>
-                +{lead.prefijo} {lead.telefono}
-              </dd>
-              <dt>Cliente nuevo</dt>
-              <dd>{lead.clienteNuevo ? "Sí" : "No"}</dd>
-              <dt>Interés</dt>
-              <dd>{lead.interes ?? "Sin indicar"}</dd>
-              <dt>Origen</dt>
-              <dd>{lead.origen ? (ORIGENES[lead.origen] ?? lead.origen) : "Sin indicar"}</dd>
-              <dt>Estado</dt>
-              <dd>{ESTADOS[lead.estado] ?? lead.estado}</dd>
-              <dt>Agente</dt>
-              <dd>{lead.agente?.nombre ?? "Sin asignar"}</dd>
-              <dt>Creado</dt>
-              <dd>{formatearFecha(lead.creado)}</dd>
-              <dt>Última modificación</dt>
-              <dd>{formatearFecha(lead.actualizado)}</dd>
+          <section className="seccion">
+            <div className="seccion-titulo">
+              <div>
+                <h2>Datos</h2>
+              </div>
+            </div>
+            <dl className="rejilla-datos">
+              <div>
+                <dt>Teléfono</dt>
+                <dd>
+                  +{lead.prefijo} {lead.telefono}
+                </dd>
+              </div>
+              <div>
+                <dt>Cliente nuevo</dt>
+                <dd>{lead.clienteNuevo ? "Sí" : "No"}</dd>
+              </div>
+              <div>
+                <dt>Interés</dt>
+                <dd>{lead.interes === null ? "Sin indicar" : `${lead.interes} / 5`}</dd>
+              </div>
+              <div>
+                <dt>Origen</dt>
+                <dd>{lead.origen ? (ORIGENES[lead.origen] ?? lead.origen) : "Sin indicar"}</dd>
+              </div>
+              <div>
+                <dt>Estado</dt>
+                <dd>
+                  <span className={`pastilla ${lead.estado}`}>{ESTADOS[lead.estado] ?? lead.estado}</span>
+                </dd>
+              </div>
+              <div>
+                <dt>Agente asignado</dt>
+                <dd>{lead.agente?.nombre ?? "Sin asignar"}</dd>
+              </div>
+              <div>
+                <dt>Fecha de creación</dt>
+                <dd>{formatearFecha(lead.creado)}</dd>
+              </div>
+              <div>
+                <dt>Última modificación</dt>
+                <dd>{formatearFecha(lead.actualizado)}</dd>
+              </div>
             </dl>
-            {/* solo se puede editar si se puede gestionar el lead */}
-            {puedeGestionar && <button onClick={() => setEditando(true)}>Editar</button>}
           </section>
 
           {/* ventana de edición: reutiliza el formulario de crear */}
@@ -193,40 +233,53 @@ export function Detalle() {
           )}
 
           {/* puntuación y desglose */}
-          <section>
-            <h2>
-              Puntuación: {lead.puntuacion} / {PRIORIDADES[lead.prioridad] ?? lead.prioridad}
-            </h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Criterio</th>
-                  <th>Valoración</th>
-                  <th>Peso</th>
-                  <th>Aporte</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lead.desglose.map((c) => (
-                  <tr key={c.criterio}>
-                    <td>{c.criterio}</td>
-                    <td>{c.valoracion}</td>
-                    <td>{c.peso} %</td>
-                    <td>{c.aporte}</td>
+          <section className="seccion">
+            <div className="seccion-titulo">
+              <div>
+                <h2>Puntuación</h2>
+              </div>
+              <div className="puntuacion-total">
+                <span>{lead.puntuacion}</span>
+                <span className={`pastilla ${lead.prioridad}`}>{PRIORIDADES[lead.prioridad] ?? lead.prioridad}</span>
+              </div>
+            </div>
+            {/* aporte de cada criterio a la puntuación */}
+            <div className="tabla-caja compacta">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Criterio</th>
+                    <th>Valoración</th>
+                    <th>Peso</th>
+                    <th>Aporte</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {lead.desglose.map((c) => (
+                    <tr key={c.criterio}>
+                      <td>{c.criterio}</td>
+                      <td>{c.valoracion}</td>
+                      <td>{c.peso} %</td>
+                      <td>{c.aporte}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           {/* gestión: cambiar el estado, asignar y liberar */}
           {puedeGestionar && (
-            <section>
-              <h2>Gestión</h2>
+            <section className="seccion gestion">
+              <div className="seccion-titulo">
+                <div>
+                  <h2>Gestión</h2>
+                </div>
+              </div>
 
               {/* cambio de estado con solo los cambios permitidos */}
-              <div>
-                <label htmlFor="estado">Cambiar estado a</label>{" "}
+              <div className="fila-gestion">
+                <label htmlFor="estado">Cambiar estado</label>
                 <select id="estado" value={nuevoEstado} onChange={(e) => setNuevoEstado(e.target.value)}>
                   <option value="">Elige un estado</option>
                   {estadosPosibles.map((e) => (
@@ -234,16 +287,20 @@ export function Detalle() {
                       {ESTADOS[e]}
                     </option>
                   ))}
-                </select>{" "}
-                <button disabled={!nuevoEstado || ocupado} onClick={() => ejecutar("/estado", "PUT", { estado: nuevoEstado })}>
+                </select>
+                <button
+                  className="boton secundario"
+                  disabled={!nuevoEstado || ocupado}
+                  onClick={() => ejecutar("/estado", "PUT", { estado: nuevoEstado })}
+                >
                   Cambiar
                 </button>
               </div>
 
               {/* el admin asigna o reasigna a cualquier agente */}
               {esAdmin && (
-                <div>
-                  <label htmlFor="agente">{lead.agente ? "Reasignar a" : "Asignar a"}</label>{" "}
+                <div className="fila-gestion">
+                  <label htmlFor="agente">{lead.agente ? "Reasignar agente" : "Asignar agente"}</label>
                   <select id="agente" value={agenteElegido} onChange={(e) => setAgenteElegido(e.target.value)}>
                     <option value="">Elige un agente</option>
                     {agentes?.datos.map((a) => (
@@ -251,8 +308,9 @@ export function Detalle() {
                         {a.nombre}
                       </option>
                     ))}
-                  </select>{" "}
+                  </select>
                   <button
+                    className="boton secundario"
                     disabled={!agenteElegido || ocupado}
                     onClick={() => ejecutar("/asignar", "POST", { agenteId: Number(agenteElegido) })}
                   >
@@ -261,26 +319,29 @@ export function Detalle() {
                 </div>
               )}
 
-              {/* un agente solo puede asignarse un lead libre */}
-              {!esAdmin && lead.agente === null && yo && (
-                <div>
-                  <button disabled={ocupado} onClick={() => ejecutar("/asignar", "POST", { agenteId: yo.id })}>
+              {/* asignarse y liberar */}
+              <div className="acciones">
+                {/* un agente solo puede asignarse un lead libre */}
+                {!esAdmin && lead.agente === null && yo && (
+                  <button
+                    className="boton principal"
+                    disabled={ocupado}
+                    onClick={() => ejecutar("/asignar", "POST", { agenteId: yo.id })}
+                  >
                     Asignármelo
                   </button>
-                </div>
-              )}
+                )}
 
-              {/* se puede liberar un lead que tiene agente */}
-              {lead.agente && (
-                <div>
-                  <button disabled={ocupado} onClick={() => ejecutar("/liberar", "POST", {})}>
-                    Liberar
+                {/* se puede liberar un lead que tiene agente */}
+                {lead.agente && (
+                  <button className="boton peligro" disabled={ocupado} onClick={() => ejecutar("/liberar", "POST", {})}>
+                    Liberar lead
                   </button>
-                </div>
-              )}
+                )}
+              </div>
 
               {errorAccion && (
-                <div role="alert">
+                <div className="error" role="alert">
                   <p>error: {errorAccion.message}</p>
                   <ul>
                     {errorAccion.detalles.map((detalle, i) => (
