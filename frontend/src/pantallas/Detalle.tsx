@@ -131,7 +131,11 @@ export function Detalle() {
         <button onClick={volver}>← Volver</button>
       </p>
 
-      {error && <p>error: {error.message}</p>}
+      {error && (
+        <p>
+          error: {error.message} <button onClick={recargar}>Reintentar</button>
+        </p>
+      )}
       {cargando && <p>cargando...</p>}
 
       {/* no se muestran datos si hay error para no enseñar datos antiguos */}

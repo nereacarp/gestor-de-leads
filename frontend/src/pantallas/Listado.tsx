@@ -132,7 +132,11 @@ export function Listado() {
         </Dialogo>
       )}
 
-      {error && <p>error: {error.message}</p>}
+      {error && (
+        <p>
+          error: {error.message} <button onClick={recargar}>Reintentar</button>
+        </p>
+      )}
       {cargando && <p>cargando...</p>}
 
       {/* no se muestra la tabla si hay error para no enseñar datos antiguos */}

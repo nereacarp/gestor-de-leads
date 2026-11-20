@@ -113,13 +113,17 @@ function FormularioPesos({ inicial }: { inicial: Peso[] }) {
 
 // pantalla de administración de los pesos de la puntuación
 export function Pesos() {
-  const { datos: respuesta, cargando, error } = useApi<{ datos: Peso[] }>("/pesos");
+  const { datos: respuesta, cargando, error, recargar } = useApi<{ datos: Peso[] }>("/pesos");
 
   return (
     <main>
       <h1>Configuración de pesos / Administración</h1>
       {cargando && <p>cargando...</p>}
-      {error && <p>error: {error.message}</p>}
+      {error && (
+        <p>
+          error: {error.message} <button onClick={recargar}>Reintentar</button>
+        </p>
+      )}
       {/* se muestra solo con datos recién cargados, para no enseñar los de otro usuario */}
       {!cargando && !error && respuesta && <FormularioPesos inicial={respuesta.datos} />}
     </main>
