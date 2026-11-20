@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { buscarAgentePorToken, registrarAuth, type BuscarAgente } from "./auth";
 import { registrarRutasAgentes } from "./agentes/rutas";
 import { registrarRutasLeads } from "./leads/rutas";
+import { registrarRutasPesos } from "./pesos/rutas";
 
 // define cómo se construye el servidor de Fastify
 export function buildApp(buscarAgente: BuscarAgente = buscarAgentePorToken) {
@@ -21,6 +22,9 @@ export function buildApp(buscarAgente: BuscarAgente = buscarAgentePorToken) {
 
   // registra la ruta GET /leads que devuelve la lista de leads con filtros, búsqueda y paginación
   registrarRutasLeads(app);
+
+  // registra las rutas GET y PUT /pesos para ver y cambiar los pesos (solo admin)
+  registrarRutasPesos(app);
 
   return app;
 }
