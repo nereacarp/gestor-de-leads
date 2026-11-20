@@ -3,6 +3,7 @@ import type { ZodError } from "zod";
 import {
   asignarLead,
   buscarRolAgente,
+  cambiarEstado,
   contarLeads,
   crearLead,
   editarLead,
@@ -11,7 +12,7 @@ import {
   obtenerLead,
   type FilaLead,
 } from "./consultas";
-import { asignarSchema, editarLeadSchema, filtrosSchema, idSchema, liberarSchema, nuevoLeadSchema } from "./esquemas";
+import { asignarSchema, editarLeadSchema, ESTADOS, estadoSchema, filtrosSchema, idSchema, liberarSchema, nuevoLeadSchema } from "./esquemas";
 
 // redondea a un decimal
 function redondear(numero: number) {
@@ -67,7 +68,30 @@ async function enviarConflicto(reply: FastifyReply, id: number) {
   return reply.code(409).send({ error: MENSAJE_CONFLICTO, actual: actual ? aLead(actual) : null });
 }
 
-// registra las rutas GET /leads, GET /leads/:id, POST /leads, PUT /leads/:id y POST /leads/:id/asignar y /liberar
+// estados a los que se puede pasar desde cada estado con PUT /leads/:id/estado
+// (a nuevo se vuelve liberando el lead y un lead nuevo pasa a en gestión asignándolo)
+const TRANSICIONES: Record<(typeof ESTADOS)[number], string[]> = {
+  nuevo: ["cerrado"],
+  en_gestion: ["contactado", "cerrado"],
+  contactado: ["en_gestion", "cerrado"],
+  cerrado: ["en_gestion", "contactado"],
+};
+
+// devuelve el motivo por el que no se puede pasar de un estado a otro, o null si se puede
+function motivoDeRechazo(de: string, a: string, tieneAgente: boolean) {
+  if (de === a) return `el lead ya está en estado ${a}`;
+  if (a === "nuevo") return "para dejar un lead como nuevo hay que liberarlo";
+  if (!TRANSICIONES[de as keyof typeof TRANSICIONES].includes(a)) {
+    return de === "nuevo"
+      ? "un lead nuevo solo puede asignarse a un agente o cerrarse"
+      : `no se puede pasar de ${de} a ${a}`;
+  }
+  // un lead sin agente solo puede cerrarse: para reabrirlo hay que asignarlo
+  if (!tieneAgente && a !== "cerrado") return "un lead cerrado sin agente se reabre asignándolo a un agente";
+  return null;
+}
+
+// registra las rutas GET /leads, GET /leads/:id, POST /leads, PUT /leads/:id, POST /leads/:id/asignar y /liberar y PUT /leads/:id/estado
 export function registrarRutasLeads(app: FastifyInstance) {
   // lista los leads con filtros, búsqueda y paginación, ordenados por puntuación
   app.get("/leads", async (request, reply) => {
@@ -233,5 +257,45 @@ export function registrarRutasLeads(app: FastifyInstance) {
     if (!liberado) return enviarConflicto(reply, id);
 
     return aLead(liberado);
+  });
+
+  // cambia el estado de un lead entre los pasos permitidos (comprobando permisos y versión)
+  app.put("/leads/:id/estado", async (request, reply) => {
+    const parametros = idSchema.safeParse(request.params);
+    if (!parametros.success) {
+      return reply.code(400).send({ error: "id no válido", detalles: aDetalles(parametros.error) });
+    }
+    const resultado = estadoSchema.safeParse(request.body);
+    if (!resultado.success) {
+      return reply.code(400).send({ error: "datos no válidos", detalles: aDetalles(resultado.error) });
+    }
+
+    const id = parametros.data.id;
+    const { estado, version } = resultado.data;
+    const existente = await obtenerLead(id);
+    if (!existente) return reply.code(404).send({ error: "lead no encontrado" });
+
+    // puede cambiar el estado el admin, el agente asignado o cualquier agente si el lead no tiene agente
+    const yo = request.agente;
+    const puedeCambiar = yo?.rol === "admin" || existente.agente_id === null || existente.agente_id === yo?.id;
+    if (!puedeCambiar) {
+      return reply.code(403).send({ error: "solo el agente asignado o un administrador pueden cambiar este lead" });
+    }
+
+    // si la versión está desactualizada se avisa antes de mirar el cambio de estado
+    if (existente.version !== version) return enviarConflicto(reply, id);
+
+    const motivo = motivoDeRechazo(existente.estado, estado, existente.agente_id !== null);
+    if (motivo) {
+      return reply.code(400).send({
+        error: "cambio de estado no permitido",
+        detalles: [{ campo: "estado", mensaje: motivo }],
+      });
+    }
+
+    const cambiado = await cambiarEstado(id, estado, version);
+    if (!cambiado) return enviarConflicto(reply, id);
+
+    return aLead(cambiado);
   });
 }

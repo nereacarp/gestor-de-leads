@@ -166,3 +166,16 @@ export async function liberarLead(id: number, version: number) {
   return obtenerLead(id);
 }
 
+// cambia el estado de un lead si la versión coincide y lo devuelve
+export async function cambiarEstado(id: number, estado: string, version: number) {
+  const filas = await sql<{ id: number }[]>`
+    update leads
+    set estado = ${estado}, version = version + 1, updated_at = now()
+    where id = ${id} and version = ${version}
+    returning id
+  `;
+  if (filas.length === 0) return null;
+
+  return obtenerLead(id);
+}
+

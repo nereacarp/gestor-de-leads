@@ -65,3 +65,9 @@ export const liberarSchema = z.strictObject({
   version: z.number().int().positive(),
 });
 
+// esquema del cuerpo que acepta PUT /leads/:id/estado (el estado nuevo y la versión que vio el cliente)
+export const estadoSchema = z.strictObject({
+  estado: z.enum(ESTADOS),
+  version: z.number().int().positive(),
+});
+
