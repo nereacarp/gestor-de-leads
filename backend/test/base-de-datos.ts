@@ -27,7 +27,13 @@ export async function prepararBaseDeDatos() {
 
   // aplica schema.sql a la base de datos de tests
   const esquema = fileURLToPath(new URL("../db/schema.sql", import.meta.url));
-  await sql.file(esquema).simple();
+  const conexion = await sql.reserve(); // aparta una conexión para que el ajuste valga para todo el archivo
+  try {
+    await conexion`set client_min_messages = warning`;
+    await conexion.file(esquema).simple();
+  } finally {
+    conexion.release();
+  }
 }
 
 // borra los leads y los agentes y deja los pesos iniciales
