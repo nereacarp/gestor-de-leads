@@ -150,3 +150,56 @@ describe("pesos no válidos", () => {
     expect(despues.cuerpo.datos).toEqual(PESOS_INICIALES);
   });
 });
+
+// tests de que cada respuesta usa un único juego de pesos aunque el admin los cambie a la vez que otros consultan
+describe("consistencia al cambiar los pesos mientras otros consultan", () => {
+  it("cada respuesta usa un juego de pesos completo y su puntuación coincide con él", async () => {
+    // dos leads con valoraciones opuestas: el primero vale 100 en cliente nuevo y 0 en antigüedad, y el segundo al revés
+    await sql`
+      insert into leads (nombre, prefijo, telefono, estado, cliente_nuevo, created_at, updated_at) values
+        ('Cliente nuevo antiguo', '34', '600000001', 'nuevo', true, now() - interval '90 days', now()),
+        ('Cliente viejo reciente', '34', '600000002', 'nuevo', false, now(), now())
+    `;
+    // con A solo cuenta el cliente nuevo y con B solo la antigüedad, así que la suma de las dos notas es siempre 100
+    const A = lista(100, 0, 0, 0);
+    const B = lista(0, 0, 0, 100);
+    const pesosDe = (desglose: { peso: number }[]) => desglose.map((c) => c.peso);
+
+    // se parte de B para que ninguna lectura vea los pesos iniciales
+    await pedir("PUT", "admin", B);
+
+    // lanza 30 cambios de pesos (alternando A y B), 30 listados y 30 lecturas de pesos a la vez
+    const peticiones = [
+      ...Array.from({ length: 30 }, (_, i) => pedir("PUT", "admin", i % 2 === 0 ? A : B).then((r) => ({ tipo: "cambio" as const, ...r }))),
+      ...Array.from({ length: 30 }, () =>
+        app
+          .inject({ method: "GET", url: "/leads", headers: { authorization: "Bearer admin" } })
+          .then((res) => ({ tipo: "listado" as const, codigo: res.statusCode, cuerpo: res.json() })),
+      ),
+      ...Array.from({ length: 30 }, () => pedir("GET").then((r) => ({ tipo: "pesos" as const, ...r }))),
+    ];
+    const respuestas = await Promise.all(peticiones);
+
+    // todas las respuestas son correctas
+    expect(respuestas.every((r) => r.codigo === 200)).toBe(true);
+
+    for (const r of respuestas) {
+      // los pesos que se leen son exactamente A o B, nunca una mezcla
+      if (r.tipo === "pesos") expect([A, B]).toContainEqual(r.cuerpo.datos);
+
+      if (r.tipo === "listado") {
+        const [primero, segundo] = r.cuerpo.datos as { puntuacion: number; desglose: { peso: number }[] }[];
+        const pesos = pesosDe(primero.desglose);
+        // los dos leads se calculan con los mismos pesos y son A o B
+        expect(pesosDe(segundo.desglose)).toEqual(pesos);
+        expect([[100, 0, 0, 0], [0, 0, 0, 100]]).toContainEqual(pesos);
+        // la puntuación coincide con esos pesos y la suma de las dos notas es 100
+        expect(primero.puntuacion + segundo.puntuacion).toBeCloseTo(100, 0);
+      }
+    }
+
+    // al terminar quedan guardados unos pesos completos que suman 100
+    const final = await pedir("GET");
+    expect([A, B]).toContainEqual(final.cuerpo.datos);
+  });
+});
