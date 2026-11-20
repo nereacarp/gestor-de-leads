@@ -1,5 +1,5 @@
 import { sql } from "../db/sql";
-import type { Filtros } from "./esquemas";
+import type { Filtros, NuevoLead } from "./esquemas";
 
 // describe cómo es cada fila que devuelve la consulta de leads
 export type FilaLead = {
@@ -22,8 +22,16 @@ export type FilaLead = {
   peso_interes: number;
   peso_origen: number;
   peso_antiguedad: number;
-  total: number;
 };
+
+// columnas de un lead con su agente, su puntuación, sus valoraciones y los pesos aplicados
+const columnasLead = sql`
+  lp.id, lp.nombre, lp.telefono, lp.estado, lp.version, lp.created_at, lp.updated_at,
+  lp.agente_id, a.nombre as agente_nombre,
+  lp.puntuacion, lp.prioridad,
+  lp.val_cliente_nuevo, lp.val_interes, lp.val_origen, lp.val_antiguedad,
+  lp.peso_cliente_nuevo, lp.peso_interes, lp.peso_origen, lp.peso_antiguedad
+`;
 
 // limpia los caracteres especiales
 function escapar(texto: string) {
@@ -53,13 +61,9 @@ function condiciones({ estado, agente, q }: Filtros) {
 export async function listarLeads(filtros: Filtros) {
   const desplazamiento = (filtros.pagina - 1) * filtros.limite;
 
-  return sql<FilaLead[]>`
+  return sql<(FilaLead & { total: number })[]>`
     select
-      lp.id, lp.nombre, lp.telefono, lp.estado, lp.version, lp.created_at, lp.updated_at,
-      lp.agente_id, a.nombre as agente_nombre,
-      lp.puntuacion, lp.prioridad,
-      lp.val_cliente_nuevo, lp.val_interes, lp.val_origen, lp.val_antiguedad,
-      lp.peso_cliente_nuevo, lp.peso_interes, lp.peso_origen, lp.peso_antiguedad,
+      ${columnasLead},
       count(*) over()::int as total
     from leads_puntuados lp
     left join agentes a on a.id = lp.agente_id
@@ -77,4 +81,39 @@ export async function contarLeads(filtros: Filtros) {
     ${condiciones(filtros)}
   `;
   return filas[0].total;
+}
+
+// devuelve un lead por su id
+export async function obtenerLead(id: number) {
+  const filas = await sql<FilaLead[]>`
+    select ${columnasLead}
+    from leads_puntuados lp
+    left join agentes a on a.id = lp.agente_id
+    where lp.id = ${id}
+  `;
+  return filas[0] ?? null;
+}
+
+// devuelve el rol de un agente
+export async function buscarRolAgente(id: number) {
+  const filas = await sql<{ rol: "agente" | "admin" }[]>`select rol from agentes where id = ${id}`;
+  return filas[0]?.rol ?? null;
+}
+
+// crea un lead (nuevo y sin agente o en gestión si trae agente) y lo devuelve con su puntuación
+export async function crearLead(datos: NuevoLead) {
+  const agenteId = datos.agenteId ?? null;
+  // un lead con agente nace en gestión, igual que al asignarlo
+  const estado = agenteId === null ? "nuevo" : "en_gestion";
+
+  const [{ id }] = await sql<{ id: number }[]>`
+    insert into leads (nombre, telefono, estado, agente_id, cliente_nuevo, interes, origen)
+    values (${datos.nombre}, ${datos.telefono}, ${estado}, ${agenteId}, ${datos.clienteNuevo},
+            ${datos.interes ?? null}, ${datos.origen ?? null})
+    returning id
+  `;
+
+  const lead = await obtenerLead(id);
+  if (!lead) throw new Error("no se encuentra el lead recién creado");
+  return lead;
 }

@@ -395,3 +395,250 @@ describe("coherencia entre estado y agente", () => {
     await expect(crearLead({ nombre: "Lead", estado, agenteId })).rejects.toThrow(/leads_estado_agente_check/);
   });
 });
+
+// hace una petición POST /leads como un usuario autenticado (por defecto, como el admin de prueba)
+async function crearPorApi(cuerpo: unknown, servidor = app) {
+  const res = await servidor.inject({
+    method: "POST",
+    url: "/leads",
+    headers: { authorization: "Bearer prueba" },
+    payload: cuerpo as object,
+  });
+  return { codigo: res.statusCode, cuerpo: res.json() };
+}
+
+// hace una petición GET /leads/:id como un usuario autenticado
+async function verLead(id: number | string) {
+  const res = await app.inject({
+    method: "GET",
+    url: `/leads/${id}`,
+    headers: { authorization: "Bearer prueba" },
+  });
+  return { codigo: res.statusCode, cuerpo: res.json() };
+}
+
+// cuenta los leads que hay en la base de datos
+async function contarFilas() {
+  const [{ total }] = await sql<{ total: number }[]>`select count(*)::int as total from leads`;
+  return total;
+}
+
+// tests de POST /leads
+describe("crear un lead", () => {
+  it("crea un lead con solo nombre y teléfono: nuevo, sin agente y con puntuación", async () => {
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Ana Torres", telefono: "600123456" });
+
+    expect(codigo).toBe(201);
+    expect(cuerpo).toMatchObject({ nombre: "Ana Torres", telefono: "600123456", estado: "nuevo", agente: null, version: 1 });
+    expect(cuerpo.desglose).toHaveLength(4);
+    // sin cliente nuevo, interés ni origen solo suma la antigüedad (100 puntos con peso 10)
+    expect(cuerpo.puntuacion).toBe(10);
+    expect(cuerpo.prioridad).toBe("baja");
+
+    const [fila] = await sql`select cliente_nuevo, interes, origen from leads`;
+    expect(fila).toEqual({ cliente_nuevo: false, interes: null, origen: null });
+  });
+
+  it("guarda todos los datos y calcula la puntuación máxima", async () => {
+    const { codigo, cuerpo } = await crearPorApi({
+      nombre: "Luis Pérez",
+      telefono: "+34600123456",
+      clienteNuevo: true,
+      interes: 5,
+      origen: "recomendacion",
+    });
+
+    expect(codigo).toBe(201);
+    expect(cuerpo.puntuacion).toBe(100);
+    expect(cuerpo.prioridad).toBe("alta");
+    expect(cuerpo.desglose.map((c: { valoracion: number }) => c.valoracion)).toEqual([100, 100, 100, 100]);
+  });
+
+  it("quita los espacios sobrantes del nombre y del teléfono", async () => {
+    const { cuerpo } = await crearPorApi({ nombre: "  Ana  ", telefono: "+34 600 123 456" });
+
+    expect(cuerpo.nombre).toBe("Ana");
+    expect(cuerpo.telefono).toBe("+34600123456");
+  });
+
+  it("el lead creado se puede ver por su id y aparece en el listado", async () => {
+    const { cuerpo: creado } = await crearPorApi({ nombre: "Ana", telefono: "600123456" });
+
+    const visto = await verLead(creado.id);
+    const listado = await pedir();
+
+    expect(visto.cuerpo).toEqual(creado);
+    expect(nombres(listado.cuerpo)).toEqual(["Ana"]);
+  });
+
+  it.each<[string, unknown]>([
+    ["sin nombre", { telefono: "600123456" }],
+    ["con el nombre vacío", { nombre: "   ", telefono: "600123456" }],
+    ["sin teléfono", { nombre: "Ana" }],
+    ["con un teléfono con letras", { nombre: "Ana", telefono: "abc123456" }],
+    ["con un teléfono demasiado corto", { nombre: "Ana", telefono: "12345" }],
+    ["con un teléfono demasiado largo", { nombre: "Ana", telefono: "1234567890123456" }],
+    ["con interés 0", { nombre: "Ana", telefono: "600123456", interes: 0 }],
+    ["con interés 6", { nombre: "Ana", telefono: "600123456", interes: 6 }],
+    ["con interés con decimales", { nombre: "Ana", telefono: "600123456", interes: 2.5 }],
+    ["con un origen que no existe", { nombre: "Ana", telefono: "600123456", origen: "tele" }],
+    ["con clienteNuevo que no es booleano", { nombre: "Ana", telefono: "600123456", clienteNuevo: "si" }],
+  ])("rechaza un lead %s", async (_descripcion, cuerpo) => {
+    const res = await crearPorApi(cuerpo);
+
+    expect(res.codigo).toBe(400);
+    expect(res.cuerpo.error).toBe("datos no válidos");
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it.each(["estado", "puntuacion", "id"])("rechaza el campo %s porque no se puede fijar", async (campo) => {
+    const res = await crearPorApi({ nombre: "Ana", telefono: "600123456", [campo]: "x" });
+
+    expect(res.codigo).toBe(400);
+    expect(res.cuerpo.detalles).toEqual([{ campo, mensaje: "campo no permitido" }]);
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it("el admin crea un lead asignado a un agente y nace en gestión", async () => {
+    const ana = await crearAgente("Ana");
+
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: ana });
+
+    expect(codigo).toBe(201);
+    expect(cuerpo).toMatchObject({ estado: "en_gestion", agente: { id: ana, nombre: "Ana" } });
+  });
+
+  it("un agente puede crear un lead asignado a sí mismo", async () => {
+    const ana = await crearAgente("Ana");
+    const comoAna = buildApp(async () => ({ id: ana, nombre: "Ana", rol: "agente" }));
+
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: ana }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(201);
+    expect(cuerpo).toMatchObject({ estado: "en_gestion", agente: { id: ana } });
+  });
+
+  it("un agente no puede crear un lead asignado a otro agente", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const comoAna = buildApp(async () => ({ id: ana, nombre: "Ana", rol: "agente" }));
+
+    const { codigo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: luis }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(403);
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it("un agente puede crear un lead sin agente", async () => {
+    const ana = await crearAgente("Ana");
+    const comoAna = buildApp(async () => ({ id: ana, nombre: "Ana", rol: "agente" }));
+
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456" }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(201);
+    expect(cuerpo).toMatchObject({ estado: "nuevo", agente: null });
+  });
+
+  it("rechaza un agente que no existe", async () => {
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: 999 });
+
+    expect(codigo).toBe(400);
+    expect(cuerpo.detalles).toEqual([{ campo: "agenteId", mensaje: "el agente no existe" }]);
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it("rechaza asignar el lead a un administrador", async () => {
+    const [{ id: admin }] = await sql<{ id: number }[]>`
+      insert into agentes (nombre, rol, token) values ('Jefa', 'admin', 'token-jefa') returning id
+    `;
+
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: admin });
+
+    expect(codigo).toBe(400);
+    expect(cuerpo.detalles[0].mensaje).toBe("no se pueden asignar leads a un administrador");
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it.each([0, -1, 1.5, "1"])("rechaza un agenteId no válido (%s)", async (agenteId) => {
+    const { codigo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId });
+
+    expect(codigo).toBe(400);
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it("rechaza una petición sin cuerpo", async () => {
+    const res = await app.inject({ method: "POST", url: "/leads", headers: { authorization: "Bearer prueba" } });
+
+    expect(res.statusCode).toBe(400);
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it("rechaza una petición sin token", async () => {
+    const sinPermiso = buildApp(async () => null);
+
+    const res = await sinPermiso.inject({ method: "POST", url: "/leads", payload: { nombre: "Ana", telefono: "600123456" } });
+    await sinPermiso.close();
+
+    expect(res.statusCode).toBe(401);
+    expect(await contarFilas()).toBe(0);
+  });
+
+  it("no se deja engañar por un texto de inyección SQL en el nombre", async () => {
+    const nombre = "Robert'); drop table leads;--";
+
+    const { codigo, cuerpo } = await crearPorApi({ nombre, telefono: "600123456" });
+
+    expect(codigo).toBe(201);
+    expect(cuerpo.nombre).toBe(nombre);
+    expect(await contarFilas()).toBe(1);
+  });
+});
+
+// tests de GET /leads/:id
+describe("ver un lead", () => {
+  it("devuelve el lead con su agente, su puntuación y su desglose", async () => {
+    const ana = await crearAgente("Ana");
+    await crearLead({ nombre: "Lead", estado: "en_gestion", agenteId: ana, clienteNuevo: true, interes: 3, origen: "web" });
+    const [{ id }] = await sql<{ id: number }[]>`select id from leads`;
+
+    const { codigo, cuerpo } = await verLead(id);
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ id, nombre: "Lead", estado: "en_gestion", agente: { id: ana, nombre: "Ana" }, version: 1 });
+    // cliente nuevo 100*40/100 + interés 50*30/100 + origen web 70*20/100 + antigüedad 100*10/100
+    expect(cuerpo.puntuacion).toBe(79);
+    expect(cuerpo.prioridad).toBe("alta");
+    expect(cuerpo.desglose).toEqual([
+      { criterio: "Cliente nuevo", valoracion: 100, peso: 40, aporte: 40 },
+      { criterio: "Interés comercial", valoracion: 50, peso: 30, aporte: 15 },
+      { criterio: "Origen del lead", valoracion: 70, peso: 20, aporte: 14 },
+      { criterio: "Antigüedad", valoracion: 100, peso: 10, aporte: 10 },
+    ]);
+  });
+
+  it("devuelve null en agente si el lead no tiene agente", async () => {
+    await crearLead({ nombre: "Lead" });
+    const [{ id }] = await sql<{ id: number }[]>`select id from leads`;
+
+    const { cuerpo } = await verLead(id);
+
+    expect(cuerpo.agente).toBeNull();
+  });
+
+  it("devuelve 404 si el lead no existe", async () => {
+    const { codigo, cuerpo } = await verLead(999);
+
+    expect(codigo).toBe(404);
+    expect(cuerpo.error).toBe("lead no encontrado");
+  });
+
+  it.each(["abc", "0", "-1", "1.5", "99999999999"])("devuelve 400 si el id es %s", async (id) => {
+    const { codigo, cuerpo } = await verLead(id);
+
+    expect(codigo).toBe(400);
+    expect(cuerpo.error).toBe("id no válido");
+  });
+});
