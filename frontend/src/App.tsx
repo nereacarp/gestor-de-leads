@@ -17,7 +17,9 @@ function Cabecera() {
     <header>
       {/* muestra el menú de navegación */}
       <nav>
-        <Link to="/">Leads</Link> <Link to="/pesos">Pesos</Link>
+        <Link to="/">Leads</Link>{" "}
+        {/* muestra el enlace a los pesos solo al admin */}
+        {!cargando && usuario?.rol === "admin" && <Link to="/pesos">Pesos</Link>}
       </nav>
       {/* permite cambiar de usuario */}
       <label>
