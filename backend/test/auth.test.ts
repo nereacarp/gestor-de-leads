@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app";
 import { soloAdmin, type Agente } from "../src/auth";
 
-// agentes de prueba (sin usar la base de datos)
+// define los agentes de prueba, sin usar la base de datos
 const agentes: Record<string, Agente> = {
   "token-agente": { id: 1, nombre: "Agente 01", rol: "agente" },
   "token-admin": { id: 2, nombre: "Admin", rol: "admin" },
@@ -11,11 +11,12 @@ const agentes: Record<string, Agente> = {
 // crea un servidor con autenticación simulada
 function crearApp() {
   const app = buildApp(async (token) => agentes[token] ?? null);
-  // ruta solo para admin (comprobación de rol)
+  // añade una ruta solo para admin para probar la comprobación de rol
   app.get("/solo-admin", { preHandler: soloAdmin }, async () => ({ ok: true }));
   return app;
 }
 
+// tests del token, el agente de cada petición y el rol de admin
 describe("autenticación simulada", () => {
   it("deja usar /health sin token", async () => {
     const res = await crearApp().inject({ method: "GET", url: "/health" });

@@ -40,7 +40,7 @@ afterAll(async () => { // cierra el servidor y la conexión a la base de datos
   await sql.end();
 });
 
-// tests de la ruta GET /agentes
+// tests de la ruta GET /agentes: lista, token, filtro por rol y errores
 describe("GET /agentes", () => {
   it("devuelve todos los agentes, admin incluido, ordenados por id", async () => {
     const { codigo, cuerpo } = await pedir();

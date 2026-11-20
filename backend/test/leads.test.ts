@@ -3,9 +3,10 @@ import { buildApp } from "../src/app";
 import { sql } from "../src/db/sql";
 import { prepararBaseDeDatos, vaciarTablas } from "./base-de-datos";
 
+// milisegundos que tiene un día
 const DIA_MS = 24 * 60 * 60 * 1000;
 
-// días a partir de los cuales la antigüedad vale 0 
+// días a partir de los cuales la antigüedad vale 0
 // tiene que coincidir con dias_max_antiguedad de db/schema.sql
 const DIAS_MAX_ANTIGUEDAD = 90;
 
@@ -31,7 +32,7 @@ type DatosLead = {
   interes?: number | null;
   origen?: string | null;
   // solo en pruebas para fijar la fecha de creación relativa
-  dias?: number; 
+  dias?: number;
   creado?: Date;
 };
 
@@ -104,7 +105,7 @@ afterAll(async () => { // cierra el servidor y la conexión a la base de datos
   await sql.end();
 });
 
-// tests de la ruta GET /leads
+// tests de la puntuación y el orden de GET /leads
 describe("puntuación y orden", () => {
   it("ordena los leads de mayor a menor puntuación", async () => {
     await crearLead({ nombre: "Baja", interes: 1, origen: "llamada", dias: DIAS_MAX_ANTIGUEDAD });
@@ -218,7 +219,7 @@ describe("puntuación y orden", () => {
   });
 });
 
-
+// tests de los filtros y la búsqueda de GET /leads
 describe("filtros y búsqueda", () => {
   it("filtra por estado", async () => {
     await crearLead({ nombre: "A", estado: "nuevo" });
@@ -302,7 +303,7 @@ describe("filtros y búsqueda", () => {
   });
 });
 
-
+// tests de la paginación y el total de GET /leads
 describe("paginación", () => {
   beforeEach(async () => { // se crean cinco leads con puntuaciones distintas
     for (const interes of [1, 2, 3, 4, 5]) {
@@ -342,7 +343,7 @@ describe("paginación", () => {
   });
 });
 
-
+// tests de los errores de GET /leads: parámetros no válidos y falta de token
 describe("errores", () => {
   it.each([
     ["estado desconocido", "?estado=cualquiera"],
