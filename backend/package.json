@@ -9,6 +9,7 @@
     "test": "vitest run",
     "db:setup": "tsx --env-file=.env src/db/setup.ts",
     "db:seed": "tsx --env-file=.env src/db/seed.ts",
+    "db:rendimiento": "tsx --env-file=.env src/db/rendimiento.ts",
     "db:reset": "tsx --env-file=.env src/db/reset.ts && npm run db:setup && npm run db:seed"
   },
   "dependencies": {
