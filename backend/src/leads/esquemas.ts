@@ -25,20 +25,41 @@ export type Filtros = z.infer<typeof filtrosSchema>;
 // orígenes que puede tener un lead
 export const ORIGENES = ["recomendacion", "web", "anuncio", "llamada"] as const;
 
-// esquema del cuerpo que acepta POST /leads
-export const nuevoLeadSchema = z.strictObject({
+// campos de un lead que se piden tanto al crear como al editar
+const datosLead = {
   nombre: z.string().trim().min(1, "el nombre es obligatorio").max(100),
-  // quita los espacios y acepta un + opcional seguido de 7 a 15 dígitos
+  // prefijo internacional sin el +: de 1 a 3 dígitos
+  prefijo: z.string().regex(/^\d{1,3}$/, "el prefijo debe tener de 1 a 3 dígitos"),
+  // número sin el prefijo: quita los espacios y exige que sean solo dígitos
   telefono: z
     .string()
     .transform((texto) => texto.replace(/\s+/g, ""))
-    .pipe(z.string().regex(/^\+?\d{7,15}$/, "el teléfono debe tener de 7 a 15 dígitos, con + opcional al principio")),
+    .pipe(z.string().regex(/^\d+$/, "el teléfono solo puede tener dígitos")),
   clienteNuevo: z.boolean().default(false),
   interes: z.number().int().min(1).max(5).optional(),
   origen: z.enum(ORIGENES).optional(),
-  // si viene, el lead se crea asignado a ese agente y en gestión
-  agenteId: z.number().int().positive().optional(),
-});
+};
+
+// comprueba que el prefijo y el teléfono suman de 7 a 15 dígitos (se añade el error al teléfono)
+function comprobarLongitudTelefono(datos: { prefijo: string; telefono: string }, ctx: z.core.$RefinementCtx) {
+  const digitos = datos.prefijo.length + datos.telefono.length;
+  if (digitos < 7 || digitos > 15) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["telefono"],
+      message: "el teléfono debe tener de 7 a 15 dígitos contando el prefijo",
+    });
+  }
+}
+
+// esquema del cuerpo que acepta POST /leads
+export const nuevoLeadSchema = z
+  .strictObject({
+    ...datosLead,
+    // si viene, el lead se crea asignado a ese agente y en gestión
+    agenteId: z.number().int().positive().optional(),
+  })
+  .superRefine(comprobarLongitudTelefono);
 
 export type NuevoLead = z.infer<typeof nuevoLeadSchema>;
 
@@ -48,9 +69,12 @@ export const idSchema = z.object({
 });
 
 // esquema del cuerpo que acepta PUT /leads/:id (los datos del lead como al crear y la versión que vio el cliente)
-export const editarLeadSchema = nuevoLeadSchema.omit({ agenteId: true }).extend({
-  version: z.number().int().positive(),
-});
+export const editarLeadSchema = z
+  .strictObject({
+    ...datosLead,
+    version: z.number().int().positive(),
+  })
+  .superRefine(comprobarLongitudTelefono);
 
 export type EditarLead = z.infer<typeof editarLeadSchema>;
 

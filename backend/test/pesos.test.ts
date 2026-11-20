@@ -99,8 +99,8 @@ describe("cambio de pesos", () => {
 
   it("se refleja en la puntuación del listado de leads", async () => {
     await sql`
-      insert into leads (nombre, telefono, estado, cliente_nuevo, created_at, updated_at)
-      values ('Lead', '600000000', 'nuevo', true, now(), now())
+      insert into leads (nombre, prefijo, telefono, estado, cliente_nuevo, created_at, updated_at)
+      values ('Lead', '34', '600000000', 'nuevo', true, now(), now())
     `;
     // devuelve la puntuación del primer lead del listado
     const pedirLeads = async () => {

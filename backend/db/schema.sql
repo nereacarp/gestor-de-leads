@@ -10,6 +10,7 @@ create table if not exists agentes (
 create table if not exists leads (
   id integer generated always as identity primary key,
   nombre text not null,
+  prefijo text not null,
   telefono text not null,
   estado text not null default 'nuevo'
     check (estado in ('nuevo', 'en_gestion', 'contactado', 'cerrado')),
@@ -26,6 +27,23 @@ create table if not exists leads (
 -- crea índices para optimizar las consultas
 create index if not exists leads_estado_idx on leads (estado);
 create index if not exists leads_agente_id_idx on leads (agente_id);
+
+-- añade el prefijo a las tablas que ya existían y pasa sus teléfonos a prefijo 34 y número sin prefijo
+alter table leads add column if not exists prefijo text;
+update leads
+set prefijo = '34',
+    telefono = regexp_replace(regexp_replace(telefono, '^\+', ''), '^34(?=[0-9]{9}$)', '')
+where prefijo is null;
+alter table leads alter column prefijo set not null;
+
+-- exige un prefijo de 1 a 3 dígitos, un teléfono solo de dígitos y de 7 a 15 dígitos entre los dos
+alter table leads drop constraint if exists leads_telefono_check;
+alter table leads add constraint leads_telefono_check
+  check (
+    prefijo ~ '^[0-9]{1,3}$'
+    and telefono ~ '^[0-9]+$'
+    and length(prefijo) + length(telefono) between 7 and 15
+  );
 
 -- exige agente en los leads en gestión o contactados (solo los nuevos y los cerrados pueden no tenerlo)
 alter table leads drop constraint if exists leads_estado_agente_check;
@@ -48,7 +66,9 @@ values (40, 30, 20, 10)
 on conflict (id) do nothing;
 
 -- calcula la valoración de cada criterio, la puntuación y la prioridad de cada lead con los pesos actuales
-create or replace view leads_puntuados as
+-- (se borra antes para poder cambiar las columnas de leads sin que falle)
+drop view if exists leads_puntuados;
+create view leads_puntuados as
 
 select
   t.*,

@@ -25,6 +25,7 @@ type Lead = {
 // describe los datos de un lead de prueba
 type DatosLead = {
   nombre: string;
+  prefijo?: string;
   telefono?: string;
   estado?: string;
   agenteId?: number | null;
@@ -48,6 +49,7 @@ async function crearAgente(nombre: string) {
 // crea un lead con una fecha de creación relativa
 async function crearLead(datos: DatosLead) {
   const d = {
+    prefijo: "34",
     telefono: "600000000",
     estado: "nuevo",
     agenteId: null,
@@ -59,8 +61,8 @@ async function crearLead(datos: DatosLead) {
   };
   const creado = d.creado ?? new Date(Date.now() - d.dias * DIA_MS);
   await sql`
-    insert into leads (nombre, telefono, estado, agente_id, cliente_nuevo, interes, origen, created_at, updated_at)
-    values (${d.nombre}, ${d.telefono}, ${d.estado}, ${d.agenteId}, ${d.clienteNuevo},
+    insert into leads (nombre, prefijo, telefono, estado, agente_id, cliente_nuevo, interes, origen, created_at, updated_at)
+    values (${d.nombre}, ${d.prefijo}, ${d.telefono}, ${d.estado}, ${d.agenteId}, ${d.clienteNuevo},
             ${d.interes}, ${d.origen}, ${creado}, ${creado})
   `;
 }
@@ -263,6 +265,7 @@ describe("filtros y búsqueda", () => {
   it("busca por nombre (sin distinguir mayúsculas) y por teléfono", async () => {
     await crearLead({ nombre: "Ana Torres", telefono: "611111111" });
     await crearLead({ nombre: "Luis Pérez", telefono: "622222222" });
+    await crearLead({ nombre: "Reino Unido", prefijo: "44", telefono: "7911123456" });
 
     const porNombre = await pedir("?q=ANA");
     const porTilde = await pedir(`?q=${encodeURIComponent("pérez")}`);
@@ -271,6 +274,12 @@ describe("filtros y búsqueda", () => {
     expect(nombres(porNombre.cuerpo)).toEqual(["Ana Torres"]);
     expect(nombres(porTilde.cuerpo)).toEqual(["Luis Pérez"]);
     expect(nombres(porTelefono.cuerpo)).toEqual(["Luis Pérez"]);
+
+    // el teléfono se busca con su prefijo, con o sin +
+    const conMas = await pedir(`?q=${encodeURIComponent("+447911")}`);
+    const sinMas = await pedir("?q=447911");
+    expect(nombres(conMas.cuerpo)).toEqual(["Reino Unido"]);
+    expect(nombres(sinMas.cuerpo)).toEqual(["Reino Unido"]);
   });
 
   it("busca % y _ como texto normal, no como comodines", async () => {
@@ -426,10 +435,10 @@ async function contarFilas() {
 // tests de POST /leads
 describe("crear un lead", () => {
   it("crea un lead con solo nombre y teléfono: nuevo, sin agente y con puntuación", async () => {
-    const { codigo, cuerpo } = await crearPorApi({ nombre: "Ana Torres", telefono: "600123456" });
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Ana Torres", prefijo: "34", telefono: "600123456" });
 
     expect(codigo).toBe(201);
-    expect(cuerpo).toMatchObject({ nombre: "Ana Torres", telefono: "600123456", estado: "nuevo", agente: null, version: 1 });
+    expect(cuerpo).toMatchObject({ nombre: "Ana Torres", prefijo: "34", telefono: "600123456", estado: "nuevo", agente: null, version: 1 });
     expect(cuerpo.desglose).toHaveLength(4);
     // sin cliente nuevo, interés ni origen solo suma la antigüedad (100 puntos con peso 10)
     expect(cuerpo.puntuacion).toBe(10);
@@ -442,7 +451,8 @@ describe("crear un lead", () => {
   it("guarda todos los datos y calcula la puntuación máxima", async () => {
     const { codigo, cuerpo } = await crearPorApi({
       nombre: "Luis Pérez",
-      telefono: "+34600123456",
+      prefijo: "34",
+      telefono: "600123456",
       clienteNuevo: true,
       interes: 5,
       origen: "recomendacion",
@@ -454,15 +464,15 @@ describe("crear un lead", () => {
     expect(cuerpo.desglose.map((c: { valoracion: number }) => c.valoracion)).toEqual([100, 100, 100, 100]);
   });
 
-  it("quita los espacios sobrantes del nombre y del teléfono", async () => {
-    const { cuerpo } = await crearPorApi({ nombre: "  Ana  ", telefono: "+34 600 123 456" });
+  it("quita los espacios sobrantes del nombre y del teléfono y guarda el prefijo aparte", async () => {
+    const { cuerpo } = await crearPorApi({ nombre: "  Ana  ", prefijo: "44", telefono: "7911 123 456" });
 
-    expect(cuerpo.nombre).toBe("Ana");
-    expect(cuerpo.telefono).toBe("+34600123456");
+    expect(cuerpo).toMatchObject({ nombre: "Ana", prefijo: "44", telefono: "7911123456" });
+    expect(await sql`select prefijo, telefono from leads`).toEqual([{ prefijo: "44", telefono: "7911123456" }]);
   });
 
   it("el lead creado se puede ver por su id y aparece en el listado", async () => {
-    const { cuerpo: creado } = await crearPorApi({ nombre: "Ana", telefono: "600123456" });
+    const { cuerpo: creado } = await crearPorApi({ nombre: "Ana", prefijo: "34", telefono: "600123456" });
 
     const visto = await verLead(creado.id);
     const listado = await pedir();
@@ -472,17 +482,22 @@ describe("crear un lead", () => {
   });
 
   it.each<[string, unknown]>([
-    ["sin nombre", { telefono: "600123456" }],
-    ["con el nombre vacío", { nombre: "   ", telefono: "600123456" }],
-    ["sin teléfono", { nombre: "Ana" }],
-    ["con un teléfono con letras", { nombre: "Ana", telefono: "abc123456" }],
-    ["con un teléfono demasiado corto", { nombre: "Ana", telefono: "12345" }],
-    ["con un teléfono demasiado largo", { nombre: "Ana", telefono: "1234567890123456" }],
-    ["con interés 0", { nombre: "Ana", telefono: "600123456", interes: 0 }],
-    ["con interés 6", { nombre: "Ana", telefono: "600123456", interes: 6 }],
-    ["con interés con decimales", { nombre: "Ana", telefono: "600123456", interes: 2.5 }],
-    ["con un origen que no existe", { nombre: "Ana", telefono: "600123456", origen: "tele" }],
-    ["con clienteNuevo que no es booleano", { nombre: "Ana", telefono: "600123456", clienteNuevo: "si" }],
+    ["sin nombre", { prefijo: "34", telefono: "600123456" }],
+    ["con el nombre vacío", { nombre: "   ", prefijo: "34", telefono: "600123456" }],
+    ["sin teléfono", { nombre: "Ana", prefijo: "34" }],
+    ["sin prefijo", { nombre: "Ana", telefono: "600123456" }],
+    ["con un teléfono con letras", { nombre: "Ana", prefijo: "34", telefono: "abc123456" }],
+    ["con un + en el teléfono", { nombre: "Ana", prefijo: "34", telefono: "+600123456" }],
+    ["con un prefijo con letras", { nombre: "Ana", prefijo: "es", telefono: "600123456" }],
+    ["con un prefijo con +", { nombre: "Ana", prefijo: "+34", telefono: "600123456" }],
+    ["con un prefijo de 4 dígitos", { nombre: "Ana", prefijo: "3434", telefono: "600123456" }],
+    ["con un teléfono demasiado corto contando el prefijo", { nombre: "Ana", prefijo: "34", telefono: "1234" }],
+    ["con un teléfono demasiado largo contando el prefijo", { nombre: "Ana", prefijo: "123", telefono: "1234567890123" }],
+    ["con interés 0", { nombre: "Ana", prefijo: "34", telefono: "600123456", interes: 0 }],
+    ["con interés 6", { nombre: "Ana", prefijo: "34", telefono: "600123456", interes: 6 }],
+    ["con interés con decimales", { nombre: "Ana", prefijo: "34", telefono: "600123456", interes: 2.5 }],
+    ["con un origen que no existe", { nombre: "Ana", prefijo: "34", telefono: "600123456", origen: "tele" }],
+    ["con clienteNuevo que no es booleano", { nombre: "Ana", prefijo: "34", telefono: "600123456", clienteNuevo: "si" }],
   ])("rechaza un lead %s", async (_descripcion, cuerpo) => {
     const res = await crearPorApi(cuerpo);
 
@@ -492,7 +507,7 @@ describe("crear un lead", () => {
   });
 
   it.each(["estado", "puntuacion", "id"])("rechaza el campo %s porque no se puede fijar", async (campo) => {
-    const res = await crearPorApi({ nombre: "Ana", telefono: "600123456", [campo]: "x" });
+    const res = await crearPorApi({ nombre: "Ana", prefijo: "34", telefono: "600123456", [campo]: "x" });
 
     expect(res.codigo).toBe(400);
     expect(res.cuerpo.detalles).toEqual([{ campo, mensaje: "campo no permitido" }]);
@@ -502,7 +517,7 @@ describe("crear un lead", () => {
   it("el admin crea un lead asignado a un agente y nace en gestión", async () => {
     const ana = await crearAgente("Ana");
 
-    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: ana });
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456", agenteId: ana });
 
     expect(codigo).toBe(201);
     expect(cuerpo).toMatchObject({ estado: "en_gestion", agente: { id: ana, nombre: "Ana" } });
@@ -512,7 +527,7 @@ describe("crear un lead", () => {
     const ana = await crearAgente("Ana");
     const comoAna = buildApp(async () => ({ id: ana, nombre: "Ana", rol: "agente" }));
 
-    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: ana }, comoAna);
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456", agenteId: ana }, comoAna);
     await comoAna.close();
 
     expect(codigo).toBe(201);
@@ -524,7 +539,7 @@ describe("crear un lead", () => {
     const luis = await crearAgente("Luis");
     const comoAna = buildApp(async () => ({ id: ana, nombre: "Ana", rol: "agente" }));
 
-    const { codigo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: luis }, comoAna);
+    const { codigo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456", agenteId: luis }, comoAna);
     await comoAna.close();
 
     expect(codigo).toBe(403);
@@ -535,7 +550,7 @@ describe("crear un lead", () => {
     const ana = await crearAgente("Ana");
     const comoAna = buildApp(async () => ({ id: ana, nombre: "Ana", rol: "agente" }));
 
-    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456" }, comoAna);
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456" }, comoAna);
     await comoAna.close();
 
     expect(codigo).toBe(201);
@@ -543,7 +558,7 @@ describe("crear un lead", () => {
   });
 
   it("rechaza un agente que no existe", async () => {
-    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: 999 });
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456", agenteId: 999 });
 
     expect(codigo).toBe(400);
     expect(cuerpo.detalles).toEqual([{ campo: "agenteId", mensaje: "el agente no existe" }]);
@@ -555,7 +570,7 @@ describe("crear un lead", () => {
       insert into agentes (nombre, rol, token) values ('Jefa', 'admin', 'token-jefa') returning id
     `;
 
-    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId: admin });
+    const { codigo, cuerpo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456", agenteId: admin });
 
     expect(codigo).toBe(400);
     expect(cuerpo.detalles[0].mensaje).toBe("no se pueden asignar leads a un administrador");
@@ -563,7 +578,7 @@ describe("crear un lead", () => {
   });
 
   it.each([0, -1, 1.5, "1"])("rechaza un agenteId no válido (%s)", async (agenteId) => {
-    const { codigo } = await crearPorApi({ nombre: "Lead", telefono: "600123456", agenteId });
+    const { codigo } = await crearPorApi({ nombre: "Lead", prefijo: "34", telefono: "600123456", agenteId });
 
     expect(codigo).toBe(400);
     expect(await contarFilas()).toBe(0);
@@ -579,7 +594,7 @@ describe("crear un lead", () => {
   it("rechaza una petición sin token", async () => {
     const sinPermiso = buildApp(async () => null);
 
-    const res = await sinPermiso.inject({ method: "POST", url: "/leads", payload: { nombre: "Ana", telefono: "600123456" } });
+    const res = await sinPermiso.inject({ method: "POST", url: "/leads", payload: { nombre: "Ana", prefijo: "34", telefono: "600123456" } });
     await sinPermiso.close();
 
     expect(res.statusCode).toBe(401);
@@ -589,7 +604,7 @@ describe("crear un lead", () => {
   it("no se deja engañar por un texto de inyección SQL en el nombre", async () => {
     const nombre = "Robert'); drop table leads;--";
 
-    const { codigo, cuerpo } = await crearPorApi({ nombre, telefono: "600123456" });
+    const { codigo, cuerpo } = await crearPorApi({ nombre, prefijo: "34", telefono: "600123456" });
 
     expect(codigo).toBe(201);
     expect(cuerpo.nombre).toBe(nombre);
@@ -599,6 +614,18 @@ describe("crear un lead", () => {
 
 // tests de GET /leads/:id
 describe("ver un lead", () => {
+  it("devuelve los datos tal como se guardaron, con interés y origen nulos si no se indicaron", async () => {
+    await crearLead({ nombre: "Con datos", clienteNuevo: true, interes: 4, origen: "anuncio" });
+    await crearLead({ nombre: "Sin datos" });
+    const filas = await sql<{ id: number; nombre: string }[]>`select id, nombre from leads order by id`;
+
+    const con = await verLead(filas[0].id);
+    const sin = await verLead(filas[1].id);
+
+    expect(con.cuerpo).toMatchObject({ clienteNuevo: true, interes: 4, origen: "anuncio" });
+    expect(sin.cuerpo).toMatchObject({ clienteNuevo: false, interes: null, origen: null });
+  });
+
   it("devuelve el lead con su agente, su puntuación y su desglose", async () => {
     const ana = await crearAgente("Ana");
     await crearLead({ nombre: "Lead", estado: "en_gestion", agenteId: ana, clienteNuevo: true, interes: 3, origen: "web" });
@@ -670,7 +697,7 @@ async function leerFila(id: number) {
 }
 
 // datos válidos para editar un lead (con la versión que vio el cliente)
-const edicion = (version: number, resto = {}) => ({ nombre: "Nuevo nombre", telefono: "699888777", version, ...resto });
+const edicion = (version: number, resto = {}) => ({ nombre: "Nuevo nombre", prefijo: "34", telefono: "699888777", version, ...resto });
 
 // tests de PUT /leads/:id
 describe("editar un lead", () => {
@@ -680,7 +707,7 @@ describe("editar un lead", () => {
     const { codigo, cuerpo } = await editarPorApi(id, edicion(1, { clienteNuevo: true, interes: 5, origen: "recomendacion" }));
 
     expect(codigo).toBe(200);
-    expect(cuerpo).toMatchObject({ id, nombre: "Nuevo nombre", telefono: "699888777", version: 2 });
+    expect(cuerpo).toMatchObject({ id, nombre: "Nuevo nombre", prefijo: "34", telefono: "699888777", version: 2 });
     expect(cuerpo.puntuacion).toBe(100);
     expect(new Date(cuerpo.actualizado).getTime()).toBeGreaterThan(new Date(cuerpo.creado).getTime());
     expect(await leerFila(id)).toMatchObject({ nombre: "Nuevo nombre", cliente_nuevo: true, interes: 5, origen: "recomendacion", version: 2 });
@@ -750,14 +777,14 @@ describe("editar un lead", () => {
   });
 
   it.each<[string, unknown]>([
-    ["sin versión", { nombre: "Ana", telefono: "600123456" }],
-    ["con versión 0", { nombre: "Ana", telefono: "600123456", version: 0 }],
-    ["con la versión como texto", { nombre: "Ana", telefono: "600123456", version: "1" }],
-    ["sin nombre", { telefono: "600123456", version: 1 }],
-    ["con un teléfono no válido", { nombre: "Ana", telefono: "abc", version: 1 }],
-    ["con interés 6", { nombre: "Ana", telefono: "600123456", version: 1, interes: 6 }],
-    ["con el campo estado", { nombre: "Ana", telefono: "600123456", version: 1, estado: "cerrado" }],
-    ["con el campo agenteId", { nombre: "Ana", telefono: "600123456", version: 1, agenteId: 1 }],
+    ["sin versión", { nombre: "Ana", prefijo: "34", telefono: "600123456" }],
+    ["con versión 0", { nombre: "Ana", prefijo: "34", telefono: "600123456", version: 0 }],
+    ["con la versión como texto", { nombre: "Ana", prefijo: "34", telefono: "600123456", version: "1" }],
+    ["sin nombre", { prefijo: "34", telefono: "600123456", version: 1 }],
+    ["con un teléfono no válido", { nombre: "Ana", prefijo: "34", telefono: "abc", version: 1 }],
+    ["con interés 6", { nombre: "Ana", prefijo: "34", telefono: "600123456", version: 1, interes: 6 }],
+    ["con el campo estado", { nombre: "Ana", prefijo: "34", telefono: "600123456", version: 1, estado: "cerrado" }],
+    ["con el campo agenteId", { nombre: "Ana", prefijo: "34", telefono: "600123456", version: 1, agenteId: 1 }],
   ])("rechaza editar %s y no cambia nada", async (_descripcion, cuerpo) => {
     const id = await crearLeadConId({ nombre: "Original" });
 

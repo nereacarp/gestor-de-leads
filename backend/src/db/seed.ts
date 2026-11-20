@@ -47,6 +47,7 @@ async function seed() {
 
     return {
       nombre: faker.person.fullName(),
+      prefijo: "34",
       telefono: faker.helpers.arrayElement(["6", "7"]) + faker.string.numeric(8),
       estado,
       agente_id: estado === "nuevo" ? null : faker.helpers.arrayElement(idsAgentes), // los nuevos no tienen agente

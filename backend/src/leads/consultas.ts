@@ -5,7 +5,11 @@ import type { EditarLead, Filtros, NuevoLead } from "./esquemas";
 export type FilaLead = {
   id: number;
   nombre: string;
+  prefijo: string;
   telefono: string;
+  cliente_nuevo: boolean;
+  interes: number | null;
+  origen: string | null;
   estado: string;
   version: number;
   created_at: Date;
@@ -26,7 +30,7 @@ export type FilaLead = {
 
 // columnas de un lead con su agente, su puntuación, sus valoraciones y los pesos aplicados
 const columnasLead = sql`
-  lp.id, lp.nombre, lp.telefono, lp.estado, lp.version, lp.created_at, lp.updated_at,
+  lp.id, lp.nombre, lp.prefijo, lp.telefono, lp.cliente_nuevo, lp.interes, lp.origen, lp.estado, lp.version, lp.created_at, lp.updated_at,
   lp.agente_id, a.nombre as agente_nombre,
   lp.puntuacion, lp.prioridad,
   lp.val_cliente_nuevo, lp.val_interes, lp.val_origen, lp.val_antiguedad,
@@ -51,7 +55,7 @@ function condiciones({ estado, agente, q }: Filtros) {
 
   const patron = q ? `%${escapar(q)}%` : null;
   const porTexto = patron
-    ? sql`and (lp.nombre ilike ${patron} or lp.telefono ilike ${patron})`
+    ? sql`and (lp.nombre ilike ${patron} or ('+' || lp.prefijo || lp.telefono) ilike ${patron})`
     : sql``;
 
   return sql`where true ${porEstado} ${porAgente} ${porTexto}`;
@@ -107,8 +111,8 @@ export async function crearLead(datos: NuevoLead) {
   const estado = agenteId === null ? "nuevo" : "en_gestion";
 
   const [{ id }] = await sql<{ id: number }[]>`
-    insert into leads (nombre, telefono, estado, agente_id, cliente_nuevo, interes, origen)
-    values (${datos.nombre}, ${datos.telefono}, ${estado}, ${agenteId}, ${datos.clienteNuevo},
+    insert into leads (nombre, prefijo, telefono, estado, agente_id, cliente_nuevo, interes, origen)
+    values (${datos.nombre}, ${datos.prefijo}, ${datos.telefono}, ${estado}, ${agenteId}, ${datos.clienteNuevo},
             ${datos.interes ?? null}, ${datos.origen ?? null})
     returning id
   `;
@@ -123,7 +127,7 @@ export async function editarLead(id: number, datos: EditarLead) {
   // la versión se comprueba y se cambia en la misma consulta, así dos ediciones a la vez no se pisan
   const filas = await sql<{ id: number }[]>`
     update leads
-    set nombre = ${datos.nombre}, telefono = ${datos.telefono}, cliente_nuevo = ${datos.clienteNuevo},
+    set nombre = ${datos.nombre}, prefijo = ${datos.prefijo}, telefono = ${datos.telefono}, cliente_nuevo = ${datos.clienteNuevo},
         interes = ${datos.interes ?? null}, origen = ${datos.origen ?? null},
         version = version + 1, updated_at = now()
     where id = ${id} and version = ${datos.version}
@@ -166,7 +170,7 @@ export async function liberarLead(id: number, version: number) {
   return obtenerLead(id);
 }
 
-// cambia el estado de un lead si la versión coincide y lo devuelve
+// cambia el estado de un lead si la versión coincide y lo devuelve, o null si no se ha podido
 export async function cambiarEstado(id: number, estado: string, version: number) {
   const filas = await sql<{ id: number }[]>`
     update leads

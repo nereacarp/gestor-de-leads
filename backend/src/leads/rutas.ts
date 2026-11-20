@@ -31,7 +31,11 @@ function aLead(fila: FilaLead) {
   return {
     id: fila.id,
     nombre: fila.nombre,
+    prefijo: fila.prefijo,
     telefono: fila.telefono,
+    clienteNuevo: fila.cliente_nuevo,
+    interes: fila.interes,
+    origen: fila.origen,
     estado: fila.estado,
     agente: fila.agente_id ? { id: fila.agente_id, nombre: fila.agente_nombre } : null,
     version: fila.version,
