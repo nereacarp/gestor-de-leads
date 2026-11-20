@@ -642,3 +642,517 @@ describe("ver un lead", () => {
     expect(cuerpo.error).toBe("id no válido");
   });
 });
+
+// hace una petición PUT /leads/:id como un usuario autenticado (por defecto, como el admin de prueba)
+async function editarPorApi(id: number | string, cuerpo: unknown, servidor = app) {
+  const res = await servidor.inject({
+    method: "PUT",
+    url: `/leads/${id}`,
+    headers: { authorization: "Bearer prueba" },
+    payload: cuerpo as object,
+  });
+  return { codigo: res.statusCode, cuerpo: res.json() };
+}
+
+// crea un lead en la base de datos y devuelve su id
+async function crearLeadConId(datos: DatosLead) {
+  await crearLead(datos);
+  const [{ id }] = await sql<{ id: number }[]>`select max(id)::int as id from leads`;
+  return id;
+}
+
+// lee de la base de datos los datos y la versión de un lead
+async function leerFila(id: number) {
+  const [fila] = await sql`
+    select nombre, telefono, cliente_nuevo, interes, origen, estado, agente_id, version from leads where id = ${id}
+  `;
+  return fila;
+}
+
+// datos válidos para editar un lead (con la versión que vio el cliente)
+const edicion = (version: number, resto = {}) => ({ nombre: "Nuevo nombre", telefono: "699888777", version, ...resto });
+
+// tests de PUT /leads/:id
+describe("editar un lead", () => {
+  it("cambia los datos, sube la versión y recalcula la puntuación", async () => {
+    const id = await crearLeadConId({ nombre: "Antiguo", telefono: "600000000" });
+
+    const { codigo, cuerpo } = await editarPorApi(id, edicion(1, { clienteNuevo: true, interes: 5, origen: "recomendacion" }));
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ id, nombre: "Nuevo nombre", telefono: "699888777", version: 2 });
+    expect(cuerpo.puntuacion).toBe(100);
+    expect(new Date(cuerpo.actualizado).getTime()).toBeGreaterThan(new Date(cuerpo.creado).getTime());
+    expect(await leerFila(id)).toMatchObject({ nombre: "Nuevo nombre", cliente_nuevo: true, interes: 5, origen: "recomendacion", version: 2 });
+  });
+
+  it("deja vacíos el interés y el origen si no se mandan", async () => {
+    const id = await crearLeadConId({ nombre: "Lead", interes: 4, origen: "web" });
+
+    const { codigo } = await editarPorApi(id, edicion(1));
+
+    expect(codigo).toBe(200);
+    expect(await leerFila(id)).toMatchObject({ interes: null, origen: null, cliente_nuevo: false });
+  });
+
+  it("no cambia el estado ni el agente", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "contactado", agenteId: ana });
+
+    await editarPorApi(id, edicion(1));
+
+    expect(await leerFila(id)).toMatchObject({ estado: "contactado", agente_id: ana });
+  });
+
+  it("devuelve 409 con el lead actual si la versión ya no coincide, y no cambia nada", async () => {
+    const id = await crearLeadConId({ nombre: "Original" });
+    await editarPorApi(id, edicion(1, { nombre: "Cambio de Ana" }));
+
+    const { codigo, cuerpo } = await editarPorApi(id, edicion(1, { nombre: "Cambio de Luis" }));
+
+    expect(codigo).toBe(409);
+    expect(cuerpo.error).toBe("el lead ha sido modificado por otra persona");
+    expect(cuerpo.actual).toMatchObject({ id, nombre: "Cambio de Ana", version: 2 });
+    expect(await leerFila(id)).toMatchObject({ nombre: "Cambio de Ana", version: 2 });
+  });
+
+  it("devuelve 409 también si la versión es mayor que la actual", async () => {
+    const id = await crearLeadConId({ nombre: "Lead" });
+
+    const { codigo } = await editarPorApi(id, edicion(5));
+
+    expect(codigo).toBe(409);
+    expect(await leerFila(id)).toMatchObject({ version: 1 });
+  });
+
+  it("con la versión nueva se puede volver a editar", async () => {
+    const id = await crearLeadConId({ nombre: "Lead" });
+    const primera = await editarPorApi(id, edicion(1, { nombre: "Uno" }));
+
+    const segunda = await editarPorApi(id, edicion(primera.cuerpo.version, { nombre: "Dos" }));
+
+    expect(segunda.codigo).toBe(200);
+    expect(segunda.cuerpo).toMatchObject({ nombre: "Dos", version: 3 });
+  });
+
+  it("si dos ediciones llegan a la vez con la misma versión, solo una se guarda", async () => {
+    const id = await crearLeadConId({ nombre: "Lead" });
+
+    const respuestas = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => editarPorApi(id, edicion(1, { nombre: `Edición ${i}` }))),
+    );
+
+    const codigos = respuestas.map((r) => r.codigo);
+    expect(codigos.filter((c) => c === 200)).toHaveLength(1);
+    expect(codigos.filter((c) => c === 409)).toHaveLength(9);
+    const ganadora = respuestas.find((r) => r.codigo === 200)!;
+    expect(await leerFila(id)).toMatchObject({ nombre: ganadora.cuerpo.nombre, version: 2 });
+  });
+
+  it.each<[string, unknown]>([
+    ["sin versión", { nombre: "Ana", telefono: "600123456" }],
+    ["con versión 0", { nombre: "Ana", telefono: "600123456", version: 0 }],
+    ["con la versión como texto", { nombre: "Ana", telefono: "600123456", version: "1" }],
+    ["sin nombre", { telefono: "600123456", version: 1 }],
+    ["con un teléfono no válido", { nombre: "Ana", telefono: "abc", version: 1 }],
+    ["con interés 6", { nombre: "Ana", telefono: "600123456", version: 1, interes: 6 }],
+    ["con el campo estado", { nombre: "Ana", telefono: "600123456", version: 1, estado: "cerrado" }],
+    ["con el campo agenteId", { nombre: "Ana", telefono: "600123456", version: 1, agenteId: 1 }],
+  ])("rechaza editar %s y no cambia nada", async (_descripcion, cuerpo) => {
+    const id = await crearLeadConId({ nombre: "Original" });
+
+    const res = await editarPorApi(id, cuerpo);
+
+    expect(res.codigo).toBe(400);
+    expect(res.cuerpo.error).toBe("datos no válidos");
+    expect(await leerFila(id)).toMatchObject({ nombre: "Original", version: 1 });
+  });
+
+  it("devuelve 404 si el lead no existe", async () => {
+    const { codigo, cuerpo } = await editarPorApi(999, edicion(1));
+
+    expect(codigo).toBe(404);
+    expect(cuerpo.error).toBe("lead no encontrado");
+  });
+
+  it.each(["abc", "0", "99999999999"])("devuelve 400 si el id es %s", async (id) => {
+    const { codigo, cuerpo } = await editarPorApi(id, edicion(1));
+
+    expect(codigo).toBe(400);
+    expect(cuerpo.error).toBe("id no válido");
+  });
+
+  describe("permisos", () => {
+    // crea un servidor que atiende como el agente indicado
+    const como = (id: number, rol: "agente" | "admin") => buildApp(async () => ({ id, nombre: "Usuario", rol }));
+
+    it("el agente asignado puede editar su lead", async () => {
+      const ana = await crearAgente("Ana");
+      const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+      const comoAna = como(ana, "agente");
+
+      const { codigo } = await editarPorApi(id, edicion(1), comoAna);
+      await comoAna.close();
+
+      expect(codigo).toBe(200);
+    });
+
+    it("cualquier agente puede editar un lead sin agente", async () => {
+      const ana = await crearAgente("Ana");
+      const id = await crearLeadConId({ nombre: "Lead" });
+      const comoAna = como(ana, "agente");
+
+      const { codigo } = await editarPorApi(id, edicion(1), comoAna);
+      await comoAna.close();
+
+      expect(codigo).toBe(200);
+    });
+
+    it("un agente no puede editar el lead de otro agente", async () => {
+      const ana = await crearAgente("Ana");
+      const luis = await crearAgente("Luis");
+      const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: luis });
+      const comoAna = como(ana, "agente");
+
+      const { codigo } = await editarPorApi(id, edicion(1), comoAna);
+      await comoAna.close();
+
+      expect(codigo).toBe(403);
+      expect(await leerFila(id)).toMatchObject({ nombre: "Lead", version: 1 });
+    });
+
+    it("el admin puede editar el lead de cualquier agente", async () => {
+      const luis = await crearAgente("Luis");
+      const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: luis });
+
+      const { codigo } = await editarPorApi(id, edicion(1));
+
+      expect(codigo).toBe(200);
+    });
+  });
+});
+
+// crea un servidor que atiende como el usuario indicado
+const servidorComo = (id: number, rol: "agente" | "admin") => buildApp(async () => ({ id, nombre: "Usuario", rol }));
+
+// hace una petición POST a /leads/:id/asignar o /leads/:id/liberar
+async function accionPorApi(accion: "asignar" | "liberar", id: number | string, cuerpo: unknown, servidor = app) {
+  const res = await servidor.inject({
+    method: "POST",
+    url: `/leads/${id}/${accion}`,
+    headers: { authorization: "Bearer prueba" },
+    payload: cuerpo as object,
+  });
+  return { codigo: res.statusCode, cuerpo: res.json() };
+}
+const asignarPorApi = (id: number | string, cuerpo: unknown, servidor = app) => accionPorApi("asignar", id, cuerpo, servidor);
+const liberarPorApi = (id: number | string, cuerpo: unknown, servidor = app) => accionPorApi("liberar", id, cuerpo, servidor);
+
+// tests de POST /leads/:id/asignar
+describe("asignar un lead", () => {
+  it("el admin asigna un lead libre: pasa a en gestión y sube la versión", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead" });
+
+    const { codigo, cuerpo } = await asignarPorApi(id, { agenteId: ana, version: 1 });
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ estado: "en_gestion", agente: { id: ana, nombre: "Ana" }, version: 2 });
+  });
+
+  it("asignar un lead cerrado sin agente lo reabre en gestión", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "cerrado" });
+
+    const { cuerpo } = await asignarPorApi(id, { agenteId: ana, version: 1 });
+
+    expect(cuerpo).toMatchObject({ estado: "en_gestion", agente: { id: ana } });
+  });
+
+  it("el admin cambia el agente de un lead asignado y se mantiene el estado", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "contactado", agenteId: ana });
+
+    const { codigo, cuerpo } = await asignarPorApi(id, { agenteId: luis, version: 1 });
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ estado: "contactado", agente: { id: luis }, version: 2 });
+  });
+
+  it("al cambiar el agente de un lead cerrado, sigue cerrado", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "cerrado", agenteId: ana });
+
+    const { cuerpo } = await asignarPorApi(id, { agenteId: luis, version: 1 });
+
+    expect(cuerpo).toMatchObject({ estado: "cerrado", agente: { id: luis } });
+  });
+
+  it("un agente puede asignarse un lead libre", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead" });
+    const comoAna = servidorComo(ana, "agente");
+
+    const { codigo, cuerpo } = await asignarPorApi(id, { agenteId: ana, version: 1 }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ estado: "en_gestion", agente: { id: ana } });
+  });
+
+  it("un agente no puede asignar el lead a otro agente", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead" });
+    const comoAna = servidorComo(ana, "agente");
+
+    const { codigo } = await asignarPorApi(id, { agenteId: luis, version: 1 }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(403);
+    expect(await leerFila(id)).toMatchObject({ agente_id: null, version: 1 });
+  });
+
+  it("un agente no puede quitarle un lead asignado a otro: 409 con el lead actual", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+    const comoLuis = servidorComo(luis, "agente");
+
+    const { codigo, cuerpo } = await asignarPorApi(id, { agenteId: luis, version: 1 }, comoLuis);
+    await comoLuis.close();
+
+    expect(codigo).toBe(409);
+    expect(cuerpo.error).toBe("el lead ya está asignado a Ana");
+    expect(cuerpo.actual).toMatchObject({ agente: { id: ana } });
+    expect(await leerFila(id)).toMatchObject({ agente_id: ana, version: 1 });
+  });
+
+  it("si dos agentes lo piden a la vez, solo uno se queda el lead", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead" });
+    const comoAna = servidorComo(ana, "agente");
+    const comoLuis = servidorComo(luis, "agente");
+
+    const respuestas = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        i % 2 === 0
+          ? asignarPorApi(id, { agenteId: ana, version: 1 }, comoAna)
+          : asignarPorApi(id, { agenteId: luis, version: 1 }, comoLuis),
+      ),
+    );
+    await comoAna.close();
+    await comoLuis.close();
+
+    const ganadoras = respuestas.filter((r) => r.codigo === 200);
+    expect(ganadoras).toHaveLength(1);
+    expect(respuestas.filter((r) => r.codigo === 409)).toHaveLength(9);
+    expect(await leerFila(id)).toMatchObject({ agente_id: ganadoras[0].cuerpo.agente.id, estado: "en_gestion", version: 2 });
+  });
+
+  it("si el admin cambia el agente a la vez a dos agentes distintos, solo uno se guarda", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const marta = await crearAgente("Marta");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+
+    const respuestas = await Promise.all([
+      asignarPorApi(id, { agenteId: luis, version: 1 }),
+      asignarPorApi(id, { agenteId: marta, version: 1 }),
+      asignarPorApi(id, { agenteId: luis, version: 1 }),
+      asignarPorApi(id, { agenteId: marta, version: 1 }),
+    ]);
+
+    const ganadoras = respuestas.filter((r) => r.codigo === 200);
+    expect(ganadoras).toHaveLength(1);
+    expect(respuestas.filter((r) => r.codigo === 409)).toHaveLength(3);
+    expect(await leerFila(id)).toMatchObject({ agente_id: ganadoras[0].cuerpo.agente.id, version: 2 });
+  });
+
+  it("devuelve 409 con el lead actual si la versión ya no coincide", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead" });
+    await editarPorApi(id, edicion(1, { nombre: "Cambiado" }));
+
+    const { codigo, cuerpo } = await asignarPorApi(id, { agenteId: ana, version: 1 });
+
+    expect(codigo).toBe(409);
+    expect(cuerpo.error).toBe("el lead ha sido modificado por otra persona");
+    expect(cuerpo.actual).toMatchObject({ nombre: "Cambiado", version: 2, agente: null });
+    expect(await leerFila(id)).toMatchObject({ agente_id: null });
+  });
+
+  it("una edición con la versión anterior a la asignación da 409", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead" });
+    await asignarPorApi(id, { agenteId: ana, version: 1 });
+
+    const { codigo } = await editarPorApi(id, edicion(1));
+
+    expect(codigo).toBe(409);
+  });
+
+  it("rechaza asignar a un agente que no existe o a un administrador", async () => {
+    const id = await crearLeadConId({ nombre: "Lead" });
+    const [{ id: admin }] = await sql<{ id: number }[]>`
+      insert into agentes (nombre, rol, token) values ('Jefa', 'admin', 'token-jefa') returning id
+    `;
+
+    const inexistente = await asignarPorApi(id, { agenteId: 999, version: 1 });
+    const alAdmin = await asignarPorApi(id, { agenteId: admin, version: 1 });
+
+    expect(inexistente.codigo).toBe(400);
+    expect(inexistente.cuerpo.detalles).toEqual([{ campo: "agenteId", mensaje: "el agente no existe" }]);
+    expect(alAdmin.codigo).toBe(400);
+    expect(alAdmin.cuerpo.detalles[0].mensaje).toBe("no se pueden asignar leads a un administrador");
+    expect(await leerFila(id)).toMatchObject({ agente_id: null, version: 1 });
+  });
+
+  it.each<[string, unknown]>([
+    ["sin agenteId", { version: 1 }],
+    ["sin versión", { agenteId: 1 }],
+    ["con la versión 0", { agenteId: 1, version: 0 }],
+    ["con agenteId como texto", { agenteId: "1", version: 1 }],
+    ["con el campo estado", { agenteId: 1, version: 1, estado: "cerrado" }],
+  ])("rechaza asignar %s", async (_descripcion, cuerpo) => {
+    await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead" });
+
+    const res = await asignarPorApi(id, cuerpo);
+
+    expect(res.codigo).toBe(400);
+    expect(await leerFila(id)).toMatchObject({ agente_id: null, version: 1 });
+  });
+
+  it("devuelve 404 si el lead no existe y 400 si el id no es válido", async () => {
+    const ana = await crearAgente("Ana");
+
+    const noExiste = await asignarPorApi(999, { agenteId: ana, version: 1 });
+    const idMalo = await asignarPorApi("abc", { agenteId: ana, version: 1 });
+
+    expect(noExiste.codigo).toBe(404);
+    expect(idMalo.codigo).toBe(400);
+  });
+});
+
+// tests de POST /leads/:id/liberar
+describe("liberar un lead", () => {
+  it.each([
+    ["en gestión", "en_gestion", "nuevo"],
+    ["contactado", "contactado", "nuevo"],
+    ["cerrado", "cerrado", "cerrado"],
+  ])("un agente libera su lead %s y queda %s sin agente", async (_descripcion, antes, despues) => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead", estado: antes, agenteId: ana });
+    const comoAna = servidorComo(ana, "agente");
+
+    const { codigo, cuerpo } = await liberarPorApi(id, { version: 1 }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ estado: despues, agente: null, version: 2 });
+  });
+
+  it("el admin puede liberar el lead de cualquier agente", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+
+    const { codigo, cuerpo } = await liberarPorApi(id, { version: 1 });
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ estado: "nuevo", agente: null });
+  });
+
+  it("un agente no puede liberar el lead de otro agente", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: luis });
+    const comoAna = servidorComo(ana, "agente");
+
+    const { codigo } = await liberarPorApi(id, { version: 1 }, comoAna);
+    await comoAna.close();
+
+    expect(codigo).toBe(403);
+    expect(await leerFila(id)).toMatchObject({ agente_id: luis, version: 1 });
+  });
+
+  it("si el lead ya no tiene agente devuelve 409 con el lead actual", async () => {
+    const id = await crearLeadConId({ nombre: "Lead" });
+
+    const { codigo, cuerpo } = await liberarPorApi(id, { version: 1 });
+
+    expect(codigo).toBe(409);
+    expect(cuerpo.error).toBe("el lead no tiene agente asignado");
+    expect(cuerpo.actual).toMatchObject({ id, agente: null });
+  });
+
+  it("devuelve 409 con el lead actual si la versión ya no coincide", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+    await asignarPorApi(id, { agenteId: luis, version: 1 });
+
+    const { codigo, cuerpo } = await liberarPorApi(id, { version: 1 });
+
+    expect(codigo).toBe(409);
+    expect(cuerpo.actual).toMatchObject({ agente: { id: luis }, version: 2 });
+    expect(await leerFila(id)).toMatchObject({ agente_id: luis });
+  });
+
+  it("si el agente y el admin lo liberan a la vez, solo uno lo consigue", async () => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+    const comoAna = servidorComo(ana, "agente");
+
+    const respuestas = await Promise.all([
+      liberarPorApi(id, { version: 1 }, comoAna),
+      liberarPorApi(id, { version: 1 }),
+      liberarPorApi(id, { version: 1 }, comoAna),
+      liberarPorApi(id, { version: 1 }),
+    ]);
+    await comoAna.close();
+
+    expect(respuestas.filter((r) => r.codigo === 200)).toHaveLength(1);
+    expect(respuestas.filter((r) => r.codigo === 409)).toHaveLength(3);
+    expect(await leerFila(id)).toMatchObject({ agente_id: null, estado: "nuevo", version: 2 });
+  });
+
+  it("después de liberar, otro agente puede asignárselo con la versión nueva", async () => {
+    const ana = await crearAgente("Ana");
+    const luis = await crearAgente("Luis");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+    const liberado = await liberarPorApi(id, { version: 1 });
+    const comoLuis = servidorComo(luis, "agente");
+
+    const { codigo, cuerpo } = await asignarPorApi(id, { agenteId: luis, version: liberado.cuerpo.version }, comoLuis);
+    await comoLuis.close();
+
+    expect(codigo).toBe(200);
+    expect(cuerpo).toMatchObject({ agente: { id: luis }, estado: "en_gestion", version: 3 });
+  });
+
+  it.each<[string, unknown]>([
+    ["sin versión", {}],
+    ["con la versión como texto", { version: "1" }],
+    ["con otros campos", { version: 1, agenteId: 2 }],
+  ])("rechaza liberar %s", async (_descripcion, cuerpo) => {
+    const ana = await crearAgente("Ana");
+    const id = await crearLeadConId({ nombre: "Lead", estado: "en_gestion", agenteId: ana });
+
+    const res = await liberarPorApi(id, cuerpo);
+
+    expect(res.codigo).toBe(400);
+    expect(await leerFila(id)).toMatchObject({ agente_id: ana, version: 1 });
+  });
+
+  it("devuelve 404 si el lead no existe y 400 si el id no es válido", async () => {
+    const noExiste = await liberarPorApi(999, { version: 1 });
+    const idMalo = await liberarPorApi("abc", { version: 1 });
+
+    expect(noExiste.codigo).toBe(404);
+    expect(idMalo.codigo).toBe(400);
+  });
+});

@@ -46,3 +46,22 @@ export type NuevoLead = z.infer<typeof nuevoLeadSchema>;
 export const idSchema = z.object({
   id: z.coerce.number().int().positive().max(2147483647),
 });
+
+// esquema del cuerpo que acepta PUT /leads/:id (los datos del lead como al crear y la versión que vio el cliente)
+export const editarLeadSchema = nuevoLeadSchema.omit({ agenteId: true }).extend({
+  version: z.number().int().positive(),
+});
+
+export type EditarLead = z.infer<typeof editarLeadSchema>;
+
+// esquema del cuerpo que acepta POST /leads/:id/asignar (el agente y la versión que vio el cliente)
+export const asignarSchema = z.strictObject({
+  agenteId: z.number().int().positive(),
+  version: z.number().int().positive(),
+});
+
+// esquema del cuerpo que acepta POST /leads/:id/liberar (la versión que vio el cliente)
+export const liberarSchema = z.strictObject({
+  version: z.number().int().positive(),
+});
+

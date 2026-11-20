@@ -1,7 +1,17 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ZodError } from "zod";
-import { buscarRolAgente, contarLeads, crearLead, listarLeads, obtenerLead, type FilaLead } from "./consultas";
-import { filtrosSchema, idSchema, nuevoLeadSchema } from "./esquemas";
+import {
+  asignarLead,
+  buscarRolAgente,
+  contarLeads,
+  crearLead,
+  editarLead,
+  liberarLead,
+  listarLeads,
+  obtenerLead,
+  type FilaLead,
+} from "./consultas";
+import { asignarSchema, editarLeadSchema, filtrosSchema, idSchema, liberarSchema, nuevoLeadSchema } from "./esquemas";
 
 // redondea a un decimal
 function redondear(numero: number) {
@@ -48,7 +58,16 @@ function aDetalles(error: ZodError) {
   });
 }
 
-// registra las rutas GET /leads, GET /leads/:id y POST /leads
+// mensaje del error cuando la versión que manda el cliente ya no es la actual
+const MENSAJE_CONFLICTO = "el lead ha sido modificado por otra persona";
+
+// responde 409 con el lead tal como está ahora para que el cliente lo vea
+async function enviarConflicto(reply: FastifyReply, id: number) {
+  const actual = await obtenerLead(id);
+  return reply.code(409).send({ error: MENSAJE_CONFLICTO, actual: actual ? aLead(actual) : null });
+}
+
+// registra las rutas GET /leads, GET /leads/:id, POST /leads, PUT /leads/:id y POST /leads/:id/asignar y /liberar
 export function registrarRutasLeads(app: FastifyInstance) {
   // lista los leads con filtros, búsqueda y paginación, ordenados por puntuación
   app.get("/leads", async (request, reply) => {
@@ -115,5 +134,104 @@ export function registrarRutasLeads(app: FastifyInstance) {
 
     const fila = await crearLead(datos);
     return reply.code(201).send(aLead(fila));
+  });
+
+  // cambia los datos de un lead si la versión que manda el cliente sigue siendo la actual
+  app.put("/leads/:id", async (request, reply) => {
+    const parametros = idSchema.safeParse(request.params);
+    if (!parametros.success) {
+      return reply.code(400).send({ error: "id no válido", detalles: aDetalles(parametros.error) });
+    }
+    const resultado = editarLeadSchema.safeParse(request.body);
+    if (!resultado.success) {
+      return reply.code(400).send({ error: "datos no válidos", detalles: aDetalles(resultado.error) });
+    }
+
+    const id = parametros.data.id;
+    const existente = await obtenerLead(id);
+    if (!existente) return reply.code(404).send({ error: "lead no encontrado" });
+
+    // puede editar el admin, el agente asignado o cualquier agente si el lead no tiene agente
+    const yo = request.agente;
+    const puedeEditar = yo?.rol === "admin" || existente.agente_id === null || existente.agente_id === yo?.id;
+    if (!puedeEditar) {
+      return reply.code(403).send({ error: "solo el agente asignado o un administrador pueden editar este lead" });
+    }
+
+    const editado = await editarLead(id, resultado.data);
+    if (!editado) return enviarConflicto(reply, id);
+
+    return aLead(editado);
+  });
+
+  // asigna un lead a un agente: el admin a cualquiera y un agente solo a sí mismo y si el lead está libre
+  app.post("/leads/:id/asignar", async (request, reply) => {
+    const parametros = idSchema.safeParse(request.params);
+    if (!parametros.success) {
+      return reply.code(400).send({ error: "id no válido", detalles: aDetalles(parametros.error) });
+    }
+    const resultado = asignarSchema.safeParse(request.body);
+    if (!resultado.success) {
+      return reply.code(400).send({ error: "datos no válidos", detalles: aDetalles(resultado.error) });
+    }
+
+    const id = parametros.data.id;
+    const { agenteId, version } = resultado.data;
+    if (!(await obtenerLead(id))) return reply.code(404).send({ error: "lead no encontrado" });
+
+    // el agente tiene que existir y no ser administrador
+    const rol = await buscarRolAgente(agenteId);
+    if (rol !== "agente") {
+      const mensaje = rol === null ? "el agente no existe" : "no se pueden asignar leads a un administrador";
+      return reply.code(400).send({ error: "datos no válidos", detalles: [{ campo: "agenteId", mensaje }] });
+    }
+
+    // un agente solo puede asignarse leads a sí mismo
+    const esAdmin = request.agente?.rol === "admin";
+    if (!esAdmin && request.agente?.id !== agenteId) {
+      return reply.code(403).send({ error: "un agente solo puede asignarse leads a sí mismo" });
+    }
+
+    // un agente solo puede coger leads libres; el admin también puede cambiar el agente de uno asignado
+    const asignado = await asignarLead(id, agenteId, version, !esAdmin);
+    if (!asignado) {
+      const actual = await obtenerLead(id);
+      const error =
+        !esAdmin && actual?.agente_id ? `el lead ya está asignado a ${actual.agente_nombre}` : MENSAJE_CONFLICTO;
+      return reply.code(409).send({ error, actual: actual ? aLead(actual) : null });
+    }
+
+    return aLead(asignado);
+  });
+
+  // quita el agente de un lead: el admin de cualquiera y un agente solo de los suyos
+  app.post("/leads/:id/liberar", async (request, reply) => {
+    const parametros = idSchema.safeParse(request.params);
+    if (!parametros.success) {
+      return reply.code(400).send({ error: "id no válido", detalles: aDetalles(parametros.error) });
+    }
+    const resultado = liberarSchema.safeParse(request.body);
+    if (!resultado.success) {
+      return reply.code(400).send({ error: "datos no válidos", detalles: aDetalles(resultado.error) });
+    }
+
+    const id = parametros.data.id;
+    const existente = await obtenerLead(id);
+    if (!existente) return reply.code(404).send({ error: "lead no encontrado" });
+
+    // si ya no tiene agente, la pantalla estaba desactualizada
+    if (existente.agente_id === null) {
+      return reply.code(409).send({ error: "el lead no tiene agente asignado", actual: aLead(existente) });
+    }
+
+    const yo = request.agente;
+    if (yo?.rol !== "admin" && existente.agente_id !== yo?.id) {
+      return reply.code(403).send({ error: "solo el agente asignado o un administrador pueden liberar este lead" });
+    }
+
+    const liberado = await liberarLead(id, resultado.data.version);
+    if (!liberado) return enviarConflicto(reply, id);
+
+    return aLead(liberado);
   });
 }

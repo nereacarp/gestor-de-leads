@@ -1,5 +1,5 @@
 import { sql } from "../db/sql";
-import type { Filtros, NuevoLead } from "./esquemas";
+import type { EditarLead, Filtros, NuevoLead } from "./esquemas";
 
 // describe cómo es cada fila que devuelve la consulta de leads
 export type FilaLead = {
@@ -117,3 +117,52 @@ export async function crearLead(datos: NuevoLead) {
   if (!lead) throw new Error("no se encuentra el lead recién creado");
   return lead;
 }
+
+// cambia los datos de un lead solo si su versión sigue siendo la que vio el cliente, y devuelve el lead (o null si la versión ya no coincide)
+export async function editarLead(id: number, datos: EditarLead) {
+  // la versión se comprueba y se cambia en la misma consulta, así dos ediciones a la vez no se pisan
+  const filas = await sql<{ id: number }[]>`
+    update leads
+    set nombre = ${datos.nombre}, telefono = ${datos.telefono}, cliente_nuevo = ${datos.clienteNuevo},
+        interes = ${datos.interes ?? null}, origen = ${datos.origen ?? null},
+        version = version + 1, updated_at = now()
+    where id = ${id} and version = ${datos.version}
+    returning id
+  `;
+  if (filas.length === 0) return null;
+
+  return obtenerLead(id);
+}
+
+// asigna un lead a un agente si la versión coincide (y, si se pide, solo si sigue libre) y lo devuelve, o null si no se ha podido
+export async function asignarLead(id: number, agenteId: number, version: number, soloSiLibre: boolean) {
+  // un lead sin agente o nuevo pasa a en gestión; uno que ya tenía agente mantiene su estado
+  const filas = await sql<{ id: number }[]>`
+    update leads
+    set agente_id = ${agenteId},
+        estado = case when agente_id is null or estado = 'nuevo' then 'en_gestion' else estado end,
+        version = version + 1, updated_at = now()
+    where id = ${id} and version = ${version} ${soloSiLibre ? sql`and agente_id is null` : sql``}
+    returning id
+  `;
+  if (filas.length === 0) return null;
+
+  return obtenerLead(id);
+}
+
+// quita el agente de un lead si la versión coincide y lo devuelve, o null si no se ha podido
+export async function liberarLead(id: number, version: number) {
+  // un lead en gestión o contactado vuelve a nuevo; uno cerrado se queda cerrado
+  const filas = await sql<{ id: number }[]>`
+    update leads
+    set agente_id = null,
+        estado = case when estado in ('en_gestion', 'contactado') then 'nuevo' else estado end,
+        version = version + 1, updated_at = now()
+    where id = ${id} and version = ${version}
+    returning id
+  `;
+  if (filas.length === 0) return null;
+
+  return obtenerLead(id);
+}
+
