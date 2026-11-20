@@ -11,6 +11,11 @@ export class ErrorApi extends Error {
     this.estado = estado;
     this.detalles = detalles;
   }
+
+  // indica si repetir la petición puede arreglarlo (no hay conexión o falla el servidor)
+  get reintentable() {
+    return this.estado === 0 || this.estado >= 500;
+  }
 }
 
 // describe las opciones de la petición (método y cuerpo opcional)

@@ -153,9 +153,11 @@ export function Pesos() {
       {error && (
         <p className="error">
           error: {error.message}{" "}
-          <button className="boton secundario" onClick={recargar}>
-            Reintentar
-          </button>
+          {error.reintentable && (
+            <button className="boton secundario" onClick={recargar}>
+              Reintentar
+            </button>
+          )}
         </p>
       )}
       {/* se muestra solo con datos recién cargados, para no enseñar los de otro usuario */}

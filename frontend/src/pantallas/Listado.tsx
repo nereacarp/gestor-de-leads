@@ -147,9 +147,11 @@ export function Listado() {
       {error && (
         <p className="error">
           error: {error.message}{" "}
-          <button className="boton secundario" onClick={recargar}>
-            Reintentar
-          </button>
+          {error.reintentable && (
+            <button className="boton secundario" onClick={recargar}>
+              Reintentar
+            </button>
+          )}
         </p>
       )}
       {cargando && <p className="cargando">cargando...</p>}
