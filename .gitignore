@@ -10,4 +10,4 @@ coverage/
 *.log
 
 # notas del proyecto
-notas.md
+docs/
